@@ -6,13 +6,19 @@ import { postRaceCommentary } from "./commentary";
 import { RACE_TIMING } from "./constants";
 import type { RaceStatus, GroundCondition, RaceDistance } from "./constants";
 
-const supabase = createAdminClient();
+// Lazy-init: avoid build-time crash when env vars aren't set
+let _supabase: ReturnType<typeof createAdminClient> | null = null;
+function db() {
+  if (!_supabase) _supabase = createAdminClient();
+  return _supabase;
+}
+
 
 // ======= QUERIES =======
 
 export async function getCurrentRace() {
   // First try non-settled races
-  const { data: active, error: activeError } = await supabase
+  const { data: active, error: activeError } = await db()
     .from("races")
     .select("*")
     .neq("status", "settled")
@@ -26,7 +32,7 @@ export async function getCurrentRace() {
   }
 
   // Check if last settled race is still in results window
-  const { data: lastSettled } = await supabase
+  const { data: lastSettled } = await db()
     .from("races")
     .select("*")
     .eq("status", "settled")
@@ -47,7 +53,7 @@ export async function getCurrentRace() {
 }
 
 async function getNextRaceNumber(): Promise<number> {
-  const { data } = await supabase
+  const { data } = await db()
     .from("races")
     .select("race_number")
     .order("race_number", { ascending: false })
@@ -64,7 +70,7 @@ export async function createNextRace() {
   const serverSeedHash = hashServerSeed(serverSeed);
 
   // Get all horse IDs
-  const { data: allHorses } = await supabase
+  const { data: allHorses } = await db()
     .from("horses")
     .select("id, speed, stamina, form, consistency, ground_preference");
 
@@ -110,7 +116,7 @@ export async function createNextRace() {
   ).toISOString();
 
   // Insert race
-  const { data: race, error: raceError } = await supabase
+  const { data: race, error: raceError } = await db()
     .from("races")
     .insert({
       race_number: raceNumber,
@@ -130,7 +136,7 @@ export async function createNextRace() {
   if (raceError) {
     if (raceError.code === "23505") {
       // Duplicate — another tick created it
-      const { data: existing } = await supabase
+      const { data: existing } = await db()
         .from("races")
         .select("*")
         .eq("race_number", raceNumber)
@@ -155,13 +161,13 @@ export async function createNextRace() {
     };
   });
 
-  await supabase.from("race_entries").insert(entries);
+  await db().from("race_entries").insert(entries);
 
   return race;
 }
 
 export async function closeRace(raceId: string) {
-  await supabase
+  await db()
     .from("races")
     .update({ status: "closed" })
     .eq("id", raceId)
@@ -170,7 +176,7 @@ export async function closeRace(raceId: string) {
 
 export async function runRace(raceId: string) {
   // Get race + entries + horses
-  const { data: race } = await supabase
+  const { data: race } = await db()
     .from("races")
     .select("server_seed, client_seed, nonce, distance, ground")
     .eq("id", raceId)
@@ -178,7 +184,7 @@ export async function runRace(raceId: string) {
 
   if (!race) throw new Error("Race not found");
 
-  const { data: entries } = await supabase
+  const { data: entries } = await db()
     .from("race_entries")
     .select("horse_id, horses(id, speed, stamina, form, consistency, ground_preference)")
     .eq("race_id", raceId);
@@ -215,7 +221,7 @@ export async function runRace(raceId: string) {
   );
 
   // Update race status
-  await supabase
+  await db()
     .from("races")
     .update({
       status: "racing",
@@ -225,7 +231,7 @@ export async function runRace(raceId: string) {
 
   // Write finish positions to entries — batch update with error checking
   for (const finish of result.finishOrder) {
-    const { error, count } = await supabase
+    const { error, count } = await db()
       .from("race_entries")
       .update({
         power_score: finish.powerScore,
@@ -241,7 +247,7 @@ export async function runRace(raceId: string) {
   }
 
   // Verify all entries have positions
-  const { data: check } = await supabase
+  const { data: check } = await db()
     .from("race_entries")
     .select("horse_id, finish_position")
     .eq("race_id", raceId)
@@ -253,7 +259,7 @@ export async function runRace(raceId: string) {
     let nextPos = 9;
     for (const missing of check) {
       nextPos--;
-      await supabase
+      await db()
         .from("race_entries")
         .update({ finish_position: nextPos, power_score: 0, margin: 99 })
         .eq("race_id", raceId)
@@ -266,7 +272,7 @@ export async function runRace(raceId: string) {
 
 export async function settleRace(raceId: string) {
   // Get the winner
-  const { data: winner } = await supabase
+  const { data: winner } = await db()
     .from("race_entries")
     .select("horse_id")
     .eq("race_id", raceId)
@@ -276,7 +282,7 @@ export async function settleRace(raceId: string) {
   if (!winner) throw new Error("No winner found");
 
   // Get server seed for settlement
-  const { data: race } = await supabase
+  const { data: race } = await db()
     .from("races")
     .select("server_seed, race_number")
     .eq("id", raceId)
@@ -285,7 +291,7 @@ export async function settleRace(raceId: string) {
   if (!race) throw new Error("Race not found");
 
   // Settle via RPC
-  const { error } = await supabase.rpc("settle_race", {
+  const { error } = await db().rpc("settle_race", {
     p_race_id: raceId,
     p_winning_horse_id: winner.horse_id,
     p_server_seed: race.server_seed,
@@ -312,13 +318,13 @@ export async function settleRace(raceId: string) {
 }
 
 async function updateHorseStats(raceId: string) {
-  const { data: race } = await supabase
+  const { data: race } = await db()
     .from("races")
     .select("race_number, distance, ground")
     .eq("id", raceId)
     .single();
 
-  const { data: entries } = await supabase
+  const { data: entries } = await db()
     .from("race_entries")
     .select("horse_id, finish_position, power_score, gate_position")
     .eq("race_id", raceId);
@@ -342,7 +348,7 @@ async function updateHorseStats(raceId: string) {
     const speedRating = Math.round(Math.max(60, Math.min(120, rawPower * 1.1)));
 
     // Get current horse data
-    const { data: horse } = await supabase
+    const { data: horse } = await db()
       .from("horses")
       .select("form, career_races, career_wins, career_places, career_shows, last_5_results, distance_record, ground_record, gate_record, speed_rating, avg_finish")
       .eq("id", entry.horse_id)
@@ -387,7 +393,7 @@ async function updateHorseStats(raceId: string) {
     // Rolling speed rating (weighted toward recent)
     const newSpeedRating = Math.round(((horse.speed_rating || 70) * 0.7 + speedRating * 0.3));
 
-    await supabase
+    await db()
       .from("horses")
       .update({
         form: newForm,
@@ -409,13 +415,13 @@ async function updateHorseStats(raceId: string) {
 }
 
 async function postRaceResult(raceId: string) {
-  const { data: race } = await supabase
+  const { data: race } = await db()
     .from("races")
     .select("race_number")
     .eq("id", raceId)
     .single();
 
-  const { data: entries } = await supabase
+  const { data: entries } = await db()
     .from("race_entries")
     .select("finish_position, horse_id, margin, horses(name)")
     .eq("race_id", raceId)
@@ -431,7 +437,7 @@ async function postRaceResult(raceId: string) {
 
   const message = `Race #${race.race_number} — ${winnerName} wins! 2nd: ${secondName}, 3rd: ${thirdName}`;
 
-  await supabase.from("chat_messages").insert({
+  await db().from("chat_messages").insert({
     user_id: null,
     username: "throws.gg",
     message,
@@ -440,7 +446,7 @@ async function postRaceResult(raceId: string) {
 }
 
 async function postRaceBigWins(raceId: string) {
-  const { data: race } = await supabase
+  const { data: race } = await db()
     .from("races")
     .select("race_number")
     .eq("id", raceId)
@@ -449,7 +455,7 @@ async function postRaceBigWins(raceId: string) {
   if (!race) return;
 
   // Find winning bets with user info
-  const { data: wonBets } = await supabase
+  const { data: wonBets } = await db()
     .from("race_bets")
     .select("payout, locked_odds, user_id, horse_id, users(username), horses(name)")
     .eq("race_id", raceId)
@@ -472,7 +478,7 @@ async function postRaceBigWins(raceId: string) {
         ? `${username} won $${payout.toFixed(2)} on ${horseName} at ${odds.toFixed(2)}x 🔥`
         : `${username} cashed $${payout.toFixed(2)} on ${horseName} 🏇`;
 
-    await supabase.from("chat_messages").insert({
+    await db().from("chat_messages").insert({
       user_id: null,
       username: "throws.gg",
       message,

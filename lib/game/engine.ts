@@ -8,7 +8,12 @@ import { TIMING, CLIENT_SEED_DEFAULT } from "./constants";
 import { postRoundResult } from "@/lib/chat/system-messages";
 import type { Move, RoundResult, RoundStatus } from "./constants";
 
-const supabase = createAdminClient();
+// Lazy-init: avoid build-time crash when env vars aren't set
+let _supabase: ReturnType<typeof createAdminClient> | null = null;
+function db() {
+  if (!_supabase) _supabase = createAdminClient();
+  return _supabase;
+}
 
 /**
  * Get the current active round.
@@ -16,7 +21,7 @@ const supabase = createAdminClient();
  */
 export async function getCurrentRound() {
   // First try non-settled rounds
-  const { data: active, error: activeError } = await supabase
+  const { data: active, error: activeError } = await db()
     .from("rounds")
     .select("*")
     .neq("status", "settled")
@@ -31,7 +36,7 @@ export async function getCurrentRound() {
   }
 
   // Check if the most recent settled round is still in its results display window
-  const { data: lastSettled } = await supabase
+  const { data: lastSettled } = await db()
     .from("rounds")
     .select("*")
     .eq("status", "settled")
@@ -57,7 +62,7 @@ export async function getCurrentRound() {
  * Get the next round number.
  */
 async function getNextRoundNumber(): Promise<number> {
-  const { data } = await supabase
+  const { data } = await db()
     .from("rounds")
     .select("round_number")
     .order("round_number", { ascending: false })
@@ -81,7 +86,7 @@ export async function createNextRound() {
     now.getTime() + TIMING.BETTING_WINDOW * 1000
   ).toISOString();
 
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from("rounds")
     .insert({
       round_number: roundNumber,
@@ -99,7 +104,7 @@ export async function createNextRound() {
   if (error) {
     // Duplicate key = another tick already created this round, just fetch it
     if (error.code === "23505") {
-      const { data: existing } = await supabase
+      const { data: existing } = await db()
         .from("rounds")
         .select("*")
         .eq("round_number", roundNumber)
@@ -116,7 +121,7 @@ export async function createNextRound() {
  * Lock the round — no more bets accepted.
  */
 export async function lockRound(roundId: string) {
-  const { error } = await supabase
+  const { error } = await db()
     .from("rounds")
     .update({ status: "locked" })
     .eq("id", roundId)
@@ -132,7 +137,7 @@ export async function lockRound(roundId: string) {
  */
 export async function playRound(roundId: string) {
   // Get the round to access seeds
-  const { data: round, error: fetchError } = await supabase
+  const { data: round, error: fetchError } = await db()
     .from("rounds")
     .select("server_seed, client_seed, nonce")
     .eq("id", roundId)
@@ -148,7 +153,7 @@ export async function playRound(roundId: string) {
     round.nonce
   );
 
-  const { error } = await supabase
+  const { error } = await db()
     .from("rounds")
     .update({
       status: "playing",
@@ -172,7 +177,7 @@ export async function playRound(roundId: string) {
  */
 export async function settleRound(roundId: string) {
   // Get the round data needed for settlement
-  const { data: round, error: fetchError } = await supabase
+  const { data: round, error: fetchError } = await db()
     .from("rounds")
     .select("violet_move, magenta_move, result, winning_move, server_seed")
     .eq("id", roundId)
@@ -182,7 +187,7 @@ export async function settleRound(roundId: string) {
     throw new Error(`Failed to fetch round for settlement: ${fetchError?.message}`);
   }
 
-  const { error } = await supabase.rpc("settle_round", {
+  const { error } = await db().rpc("settle_round", {
     p_round_id: roundId,
     p_violet_move: round.violet_move,
     p_magenta_move: round.magenta_move,
