@@ -144,9 +144,12 @@ export function RaceWinCard({
               display: "flex", justifyContent: "space-between", alignItems: "center",
               padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)",
             }}>
-              <div style={{ color: "#8B5CF6", fontWeight: 900, fontSize: 18, letterSpacing: "-0.5px" }}>
-                throws.gg
-              </div>
+              <img
+                src="/logo-horse.png"
+                alt="throws.gg"
+                style={{ height: 24, width: "auto" }}
+                crossOrigin="anonymous"
+              />
               <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, fontFamily: "monospace" }}>
                 RACE #{raceNumber.toLocaleString()}
               </div>
