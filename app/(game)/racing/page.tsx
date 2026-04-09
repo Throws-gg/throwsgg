@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthActions } from "@/lib/auth/auth-context";
 import { RaceCanvas } from "@/components/racing/RaceCanvas";
-import { RACE_TIMING } from "@/lib/racing/constants";
+import { RACE_TIMING, BANKROLL_RACING } from "@/lib/racing/constants";
 import type { RaceState, RaceEntry, RacePhase, Horse } from "@/lib/racing/constants";
 import { getHorseIdentity } from "@/lib/racing/constants";
 import { RaceWinCard } from "@/components/racing/RaceWinCard";
@@ -64,6 +64,10 @@ export default function RacingPage() {
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
   const { play, playWin } = useSound();
 
+  // Use ref so fetchState always sees latest bets without re-creating the callback
+  const activeBetsRef = useRef(activeBets);
+  activeBetsRef.current = activeBets;
+
   // Fetch state
   const fetchState = useCallback(async () => {
     try {
@@ -95,9 +99,10 @@ export default function RacingPage() {
           }
 
           // Check bet outcomes when race settles
-          if (state.currentRace.status === "settled" && state.currentRace.winningHorseId && activeBets.length > 0 && !settledRef.current) {
+          const currentBets = activeBetsRef.current;
+          if (state.currentRace.status === "settled" && state.currentRace.winningHorseId && currentBets.length > 0 && !settledRef.current) {
             settledRef.current = true;
-            const updatedBets = activeBets.map(bet => {
+            const updatedBets = currentBets.map(bet => {
               // Find horse's finish position from entries
               const horseEntry = state.currentRace.entries.find((e: RaceEntry) => e.horseId === bet.horseId);
               const finishPos = horseEntry?.finishPosition || 99;
@@ -203,8 +208,8 @@ export default function RacingPage() {
   });
 
   return (
-    <div className="flex h-full">
-    <div className="flex-1 max-w-2xl mx-auto px-4 py-3 space-y-3">
+    <div className="flex h-full overflow-hidden">
+    <div className="flex-1 max-w-2xl mx-auto px-4 py-3 space-y-3 overflow-x-hidden w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -241,25 +246,8 @@ export default function RacingPage() {
         </div>
       </div>
 
-      {/* Gates countdown — shown during closed phase */}
-      {phase === "closed" && (
-        <div className="rounded-2xl border border-white/[0.06] bg-[#0a0a12] flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className={cn(
-              "font-mono font-black tabular-nums text-white",
-              timeRemaining <= 3 ? "text-6xl text-gold animate-pulse" : "text-4xl"
-            )}>
-              {timeRemaining}
-            </div>
-            <p className="text-xs uppercase tracking-[0.2em] text-white/40 font-bold mt-2">
-              {timeRemaining <= 3 ? "STARTING" : "GATES LOADING"}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* 2D Race Canvas — only during actual racing */}
-      {isRacing && currentRace.checkpoints && (
+      {/* 2D Race Canvas — during closed phase (idle at gates) and racing */}
+      {(phase === "closed" || isRacing) && (
         <RaceCanvas
           entries={currentRace.entries}
           checkpoints={currentRace.checkpoints}
@@ -529,7 +517,8 @@ function HorseBetCard({
   const [betType, setBetType] = useState<"win" | "place" | "show">("win");
   const [placing, setPlacing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const CHIPS = [1, 5, 10, 25];
+  const [maxLiabilityBet, setMaxLiabilityBet] = useState<number | null>(null);
+  const CHIPS = [0.10, 0.50, 1, 5, 10];
 
   const activeOdds = betType === "place" ? entry.placeOdds : betType === "show" ? entry.showOdds : entry.currentOdds;
   const potentialPayout = betAmount * activeOdds;
@@ -553,8 +542,21 @@ function HorseBetCard({
         body: JSON.stringify({ userId, raceId, horseId: entry.horseId, amount: betAmount, betType }),
       });
       const data = await res.json();
-      if (!res.ok) { setResult({ success: false, message: data.error }); }
-      else {
+      if (!res.ok) {
+        // If liability limit hit, auto-cap to max allowed
+        if (data.maxBet !== undefined) {
+          const cap = Math.round(data.maxBet * 100) / 100;
+          setMaxLiabilityBet(cap);
+          if (cap > 0) {
+            setBetAmount(cap);
+            setResult({ success: false, message: `Max bet on this horse: $${cap.toFixed(2)}` });
+          } else {
+            setResult({ success: false, message: "This horse has reached its betting limit" });
+          }
+        } else {
+          setResult({ success: false, message: data.error });
+        }
+      } else {
         useUserStore.getState().setBalance(data.newBalance);
         onBetPlaced({
           id: data.bet.id,
@@ -757,16 +759,28 @@ function HorseBetCard({
         {userId ? (
           <>
             <div className="flex gap-1.5">
-              {CHIPS.map((chip) => (
-                <button key={chip}
-                  onClick={() => setBetAmount((prev) => Math.min(prev + chip, 100, balance))}
-                  disabled={balance < chip}
-                  className={cn("flex-1 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95",
-                    "bg-white/[0.04] border-white/[0.08] text-white/70 hover:bg-white/[0.06]",
-                    balance < chip && "opacity-25")}>
-                  +${chip}
-                </button>
-              ))}
+              {CHIPS.map((chip) => {
+                const maxAllowed = Math.min(
+                  BANKROLL_RACING.MAX_BET,
+                  balance,
+                  ...(maxLiabilityBet !== null ? [maxLiabilityBet] : [])
+                );
+                const atMax = betAmount >= maxAllowed;
+                return (
+                  <button key={chip}
+                    onClick={() => setBetAmount((prev) => {
+                      const next = prev + chip;
+                      // Cap to max allowed (balance, max bet, or liability limit)
+                      return Math.round(Math.min(next, maxAllowed) * 100) / 100;
+                    })}
+                    disabled={balance < 0.10 || atMax}
+                    className={cn("flex-1 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95",
+                      "bg-white/[0.04] border-white/[0.08] text-white/70 hover:bg-white/[0.06]",
+                      (balance < 0.10 || atMax) && "opacity-25")}>
+                    +${chip < 1 ? chip.toFixed(2) : chip}
+                  </button>
+                );
+              })}
               {betAmount > 0 && (
                 <button onClick={() => setBetAmount(0)}
                   className="px-3 py-2 rounded-xl text-[10px] font-bold text-red bg-red/10 border border-red/20">CLR</button>

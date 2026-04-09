@@ -53,11 +53,15 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
     }
   }, [entries]);
 
+  // Use a container ref to measure actual available width
+  const containerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     function resize() {
-      const w = Math.min(900, window.innerWidth - 16);
+      const container = containerRef.current;
+      const w = container ? container.clientWidth : Math.min(900, window.innerWidth - 32);
       const isMobile = w < 500;
-      setCanvasSize({ w, h: isMobile ? Math.round(w * 1.1) : Math.round(w * 0.55) });
+      setCanvasSize({ w, h: isMobile ? Math.round(w * 1.0) : Math.round(w * 0.55) });
     }
     resize();
     window.addEventListener("resize", resize);
@@ -93,12 +97,18 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
     canvas.height = H * DPR;
     ctx.scale(DPR, DPR);
 
-    const isActive = phase === "racing" || phase === "results";
+    const isRacing = phase === "racing" || phase === "results";
+    const isClosed = phase === "closed";
+    const isActive = isRacing; // for scrolling/dust purposes
     const isTurf = ground !== "firm";
 
-    if (!isActive) {
+    if (!isRacing && !isClosed) {
       smoothScrollRef.current = 0;
       smoothPosRef.current.clear();
+    }
+    // During closed phase, keep horses at starting position (no scroll)
+    if (isClosed) {
+      smoothScrollRef.current = 0;
     }
 
     const skyH = H * 0.3;
@@ -302,11 +312,12 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         let frameCount: number;
         let animSpeed: number;
 
-        if (isActive) {
+        if (isRacing) {
           rowY = SPRITE.ROW_GALLOP_RIGHT;
           frameCount = SPRITE.GALLOP_FRAMES;
           animSpeed = 0.15;
         } else {
+          // Idle animation for closed/betting phase
           rowY = SPRITE.ROW_IDLE_RIGHT;
           frameCount = SPRITE.IDLE_FRAMES;
           animSpeed = 0.03;
@@ -397,8 +408,43 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         }
       }
 
+      // ===== GATES COUNTDOWN OVERLAY =====
+      if (isClosed) {
+        // Semi-transparent overlay
+        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        ctx.fillRect(0, 0, W, H);
+
+        // Countdown number
+        const countdownSize = Math.min(W * 0.15, 80);
+        ctx.font = `900 ${countdownSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // Glow effect
+        if (timeRemaining <= 3) {
+          ctx.shadowColor = "rgba(245,158,11,0.6)";
+          ctx.shadowBlur = 30;
+          ctx.fillStyle = "#F59E0B";
+        } else {
+          ctx.shadowColor = "rgba(255,255,255,0.3)";
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+        }
+        ctx.fillText(String(timeRemaining), W / 2, H * 0.42);
+
+        // Reset shadow
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+
+        // Label
+        ctx.font = `700 ${Math.min(W * 0.025, 12)}px sans-serif`;
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.letterSpacing = "0.2em";
+        ctx.fillText(timeRemaining <= 3 ? "STARTING" : "GATES LOADING", W / 2, H * 0.42 + countdownSize * 0.6);
+      }
+
       // ===== POSITION OVERLAY =====
-      if (isActive) {
+      if (isRacing) {
         const leaderboard = [...horseData].sort((a, b) => b.pos - a.pos);
         const panelW = 88;
         const rowH = 13;
@@ -434,10 +480,10 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
   }, [canvasSize, entries, phase, timeRemaining, raceDuration, ground, getTargetProgress]);
 
   return (
-    <div className="rounded-2xl border border-white/[0.06] overflow-hidden bg-[#080810]">
+    <div ref={containerRef} className="rounded-2xl border border-white/[0.06] overflow-hidden bg-[#080810] w-full">
       <canvas
         ref={canvasRef}
-        style={{ width: canvasSize.w, height: canvasSize.h, display: "block" }}
+        style={{ width: "100%", height: canvasSize.h, display: "block" }}
       />
     </div>
   );
