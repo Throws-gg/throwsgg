@@ -3,6 +3,9 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { RaceWinCard } from "@/components/racing/RaceWinCard";
+import { useUserStore } from "@/stores/userStore";
+import type { Horse } from "@/lib/racing/constants";
 
 // ======= TYPES & MOCK DATA =======
 
@@ -12,6 +15,7 @@ type BetType = "win" | "place" | "show";
 interface HistoryBet {
   id: string;
   horseName: string;
+  horseSlug: string;
   horseColor: string;
   betType: BetType;
   odds: number;
@@ -23,16 +27,16 @@ interface HistoryBet {
 }
 
 const MOCK_BETS: HistoryBet[] = [
-  { id: "1", horseName: "Moon Shot", horseColor: "#FBBF24", betType: "win", odds: 3.16, stake: 10, payout: 31.60, result: "won", raceNumber: 1284, timestamp: "2026-04-09T14:22:00Z" },
-  { id: "2", horseName: "Thunder Edge", horseColor: "#8B5CF6", betType: "place", odds: 1.85, stake: 25, payout: 0, result: "lost", raceNumber: 1283, timestamp: "2026-04-09T14:19:00Z" },
-  { id: "3", horseName: "Rug Pull", horseColor: "#EC4899", betType: "win", odds: 12.80, stake: 5, payout: 64.00, result: "won", raceNumber: 1281, timestamp: "2026-04-09T14:13:00Z" },
-  { id: "4", horseName: "Crown Jewel", horseColor: "#22C55E", betType: "show", odds: 1.35, stake: 50, payout: 67.50, result: "won", raceNumber: 1280, timestamp: "2026-04-09T14:10:00Z" },
-  { id: "5", horseName: "Night Fury", horseColor: "#EF4444", betType: "win", odds: 5.80, stake: 10, payout: 0, result: "lost", raceNumber: 1279, timestamp: "2026-04-09T14:07:00Z" },
-  { id: "6", horseName: "Paper Hands", horseColor: "#F59E0B", betType: "win", odds: 6.50, stake: 5, payout: 0, result: "lost", raceNumber: 1278, timestamp: "2026-04-09T14:04:00Z" },
-  { id: "7", horseName: "Dead Cat", horseColor: "#64748B", betType: "place", odds: 3.20, stake: 15, payout: 48.00, result: "won", raceNumber: 1276, timestamp: "2026-04-09T13:58:00Z" },
-  { id: "8", horseName: "Iron Phantom", horseColor: "#06B6D4", betType: "win", odds: 4.20, stake: 20, payout: 0, result: "lost", raceNumber: 1275, timestamp: "2026-04-09T13:55:00Z" },
-  { id: "9", horseName: "Moon Shot", horseColor: "#FBBF24", betType: "win", odds: 2.90, stake: 25, payout: 72.50, result: "won", raceNumber: 1274, timestamp: "2026-04-09T13:52:00Z" },
-  { id: "10", horseName: "Volt Runner", horseColor: "#8B5CF6", betType: "show", odds: 1.40, stake: 100, payout: 0, result: "lost", raceNumber: 1273, timestamp: "2026-04-09T13:49:00Z" },
+  { id: "1", horseName: "Moon Shot", horseSlug: "moon-shot", horseColor: "#FBBF24", betType: "win", odds: 3.16, stake: 10, payout: 31.60, result: "won", raceNumber: 1284, timestamp: "2026-04-09T14:22:00Z" },
+  { id: "2", horseName: "Thunder Edge", horseSlug: "thunder-edge", horseColor: "#8B5CF6", betType: "place", odds: 1.85, stake: 25, payout: 0, result: "lost", raceNumber: 1283, timestamp: "2026-04-09T14:19:00Z" },
+  { id: "3", horseName: "Rug Pull", horseSlug: "rug-pull", horseColor: "#EC4899", betType: "win", odds: 12.80, stake: 5, payout: 64.00, result: "won", raceNumber: 1281, timestamp: "2026-04-09T14:13:00Z" },
+  { id: "4", horseName: "Crown Jewel", horseSlug: "crown-jewel", horseColor: "#22C55E", betType: "show", odds: 1.35, stake: 50, payout: 67.50, result: "won", raceNumber: 1280, timestamp: "2026-04-09T14:10:00Z" },
+  { id: "5", horseName: "Night Fury", horseSlug: "night-fury", horseColor: "#EF4444", betType: "win", odds: 5.80, stake: 10, payout: 0, result: "lost", raceNumber: 1279, timestamp: "2026-04-09T14:07:00Z" },
+  { id: "6", horseName: "Paper Hands", horseSlug: "paper-hands", horseColor: "#F59E0B", betType: "win", odds: 6.50, stake: 5, payout: 0, result: "lost", raceNumber: 1278, timestamp: "2026-04-09T14:04:00Z" },
+  { id: "7", horseName: "Dead Cat", horseSlug: "dead-cat", horseColor: "#64748B", betType: "place", odds: 3.20, stake: 15, payout: 48.00, result: "won", raceNumber: 1276, timestamp: "2026-04-09T13:58:00Z" },
+  { id: "8", horseName: "Iron Phantom", horseSlug: "iron-phantom", horseColor: "#06B6D4", betType: "win", odds: 4.20, stake: 20, payout: 0, result: "lost", raceNumber: 1275, timestamp: "2026-04-09T13:55:00Z" },
+  { id: "9", horseName: "Moon Shot", horseSlug: "moon-shot", horseColor: "#FBBF24", betType: "win", odds: 2.90, stake: 25, payout: 72.50, result: "won", raceNumber: 1274, timestamp: "2026-04-09T13:52:00Z" },
+  { id: "10", horseName: "Volt Runner", horseSlug: "volt-runner", horseColor: "#8B5CF6", betType: "show", odds: 1.40, stake: 100, payout: 0, result: "lost", raceNumber: 1273, timestamp: "2026-04-09T13:49:00Z" },
 ];
 
 type Filter = "all" | "won" | "lost";
@@ -56,8 +60,21 @@ function formatDate(dateStr: string): string {
 
 // ======= MAIN PAGE =======
 
+function betToHorse(bet: HistoryBet): Horse {
+  return {
+    id: 0, name: bet.horseName, slug: bet.horseSlug, color: bet.horseColor,
+    speed: 70, stamina: 65, form: 72, consistency: 68,
+    groundPreference: "good", careerRaces: 0, careerWins: 0,
+    careerPlaces: 0, careerShows: 0, last5Results: [],
+    distanceRecord: {}, groundRecord: {}, gateRecord: {},
+    speedRating: 70, avgFinish: 4.5,
+  };
+}
+
 export default function HistoryPage() {
   const [filter, setFilter] = useState<Filter>("all");
+  const [shareWinBet, setShareWinBet] = useState<HistoryBet | null>(null);
+  const username = useUserStore((s) => s.username);
 
   const filteredBets = useMemo(() => {
     if (filter === "all") return MOCK_BETS;
@@ -174,7 +191,12 @@ export default function HistoryPage() {
                   transition={{ delay: i * 0.03 }}
                 >
                   {/* Desktop row */}
-                  <div className="hidden sm:grid grid-cols-[1fr_80px_70px_70px_80px_70px] gap-2 items-center px-5 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div
+                    onClick={() => bet.result === "won" ? setShareWinBet(bet) : null}
+                    className={cn(
+                      "hidden sm:grid grid-cols-[1fr_80px_70px_70px_80px_70px] gap-2 items-center px-5 py-3 hover:bg-white/[0.02] transition-colors",
+                      bet.result === "won" && "cursor-pointer"
+                    )}>
                     {/* Horse */}
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: bet.horseColor }} />
@@ -213,7 +235,12 @@ export default function HistoryPage() {
                   </div>
 
                   {/* Mobile card */}
-                  <div className="sm:hidden px-4 py-3 flex items-center gap-3">
+                  <div
+                    onClick={() => bet.result === "won" ? setShareWinBet(bet) : null}
+                    className={cn(
+                      "sm:hidden px-4 py-3 flex items-center gap-3",
+                      bet.result === "won" && "cursor-pointer active:bg-white/[0.03]"
+                    )}>
                     {/* Left: colour dot + result indicator */}
                     <div className="relative shrink-0">
                       <div className="w-9 h-9 rounded-full flex items-center justify-center"
@@ -276,6 +303,22 @@ export default function HistoryPage() {
             </div>
           )}
         </motion.div>
+
+        {/* Share win card modal */}
+        {shareWinBet && (
+          <RaceWinCard
+            horse={betToHorse(shareWinBet)}
+            betAmount={shareWinBet.stake}
+            lockedOdds={shareWinBet.odds}
+            payout={shareWinBet.payout}
+            raceNumber={shareWinBet.raceNumber}
+            distance={1200}
+            ground="good"
+            gatePosition={1}
+            username={username || "anon"}
+            onClose={() => setShareWinBet(null)}
+          />
+        )}
       </div>
     </div>
   );
