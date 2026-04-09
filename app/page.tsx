@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import Image from "next/image";
+import { LiveWinsTicker } from "@/components/game/LiveWinsTicker";
 
 // ======= ANIMATED COUNTER =======
 
@@ -182,6 +183,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-hidden">
+      <LiveWinsTicker />
 
       {/* ===== HERO SECTION ===== */}
       <section className="relative min-h-[100vh] flex flex-col items-center justify-center px-4 py-12 sm:py-20">

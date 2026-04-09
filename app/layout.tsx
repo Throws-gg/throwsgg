@@ -3,7 +3,6 @@ import { Outfit } from "next/font/google";
 import { Providers } from "@/components/layout/Providers";
 import { Navbar } from "@/components/layout/Navbar";
 import { MobileNav } from "@/components/layout/MobileNav";
-import { LiveWinsTicker } from "@/components/game/LiveWinsTicker";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -27,7 +26,6 @@ export default function RootLayout({
       <body className="min-h-screen flex flex-col bg-background text-foreground antialiased">
         <Providers>
           <Navbar />
-          <LiveWinsTicker />
           <main className="flex-1">{children}</main>
         </Providers>
       </body>
