@@ -55,10 +55,12 @@ function UserMenu() {
     return (
       <Button
         size="sm"
-        className="bg-violet hover:bg-violet/80 text-white"
+        className="bg-violet text-white font-black text-xs px-3
+          hover:bg-violet/90 active:scale-95
+          animate-cta-glow"
         onClick={login}
       >
-        play now
+        START BETTING
       </Button>
     );
   }

@@ -5,12 +5,22 @@ import { simulateRace } from "@/lib/racing/simulation";
 import { RACE_TIMING } from "@/lib/racing/constants";
 import type { RacePhase, RaceState, GroundCondition, RaceDistance } from "@/lib/racing/constants";
 
+// In-memory cache — avoids hitting Supabase on every 2s poll
+let cachedState: { data: unknown; raceId: string; status: string; timestamp: number } | null = null;
+const CACHE_TTL = 1500; // 1.5 seconds
+
 export async function GET() {
   const supabase = createAdminClient();
 
   try {
-    // Advance engine if needed
-    try { await tick(); } catch { /* non-fatal */ }
+    // Advance engine in background — don't block state response
+    tick().catch(() => {});
+
+    // Check cache first — return immediately if fresh
+    const cacheNow = Date.now();
+    if (cachedState && cacheNow - cachedState.timestamp < CACHE_TTL) {
+      return NextResponse.json(cachedState.data);
+    }
 
     const current = await getCurrentRace();
 
@@ -177,9 +187,19 @@ export async function GET() {
       phase,
     };
 
+    // Cache the response
+    cachedState = {
+      data: state,
+      raceId: current.id,
+      status: current.status,
+      timestamp: Date.now(),
+    };
+
     return NextResponse.json(state);
   } catch (error) {
     console.error("Race state error:", error);
+    // Return stale cache if available on error
+    if (cachedState) return NextResponse.json(cachedState.data);
     return NextResponse.json({ error: "Failed to get race state" }, { status: 500 });
   }
 }

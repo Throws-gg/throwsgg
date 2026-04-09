@@ -16,13 +16,8 @@ export async function GET() {
   const supabase = createAdminClient();
 
   try {
-    // Advance the game engine if a transition is due
-    // This makes every poll also drive the game loop
-    try {
-      await tick();
-    } catch {
-      // Non-fatal — game state is still readable even if tick fails
-    }
+    // Advance engine in background — don't block state response
+    tick().catch(() => {});
 
     // Use the engine's getCurrentRound which handles the results window
     const current = await getCurrentRound();

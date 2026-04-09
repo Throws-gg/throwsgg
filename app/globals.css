@@ -199,6 +199,16 @@
   animation: deposit-glow 3s ease-in-out infinite;
 }
 
+/* CTA button pulse */
+@keyframes cta-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(139, 92, 246, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.4); }
+}
+
+.animate-cta-glow {
+  animation: cta-glow 3s ease-in-out infinite;
+}
+
 /* Live wins ticker */
 @keyframes ticker-scroll {
   from { transform: translateX(0); }
