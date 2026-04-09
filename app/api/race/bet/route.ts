@@ -86,9 +86,13 @@ export async function POST(request: NextRequest) {
       (sum, b) => sum + parseFloat(b.potential_payout), 0
     );
 
+    const remainingLiability = maxLiability - currentLiability;
+
     if (currentLiability + potentialPayout > maxLiability) {
+      // Calculate max bet amount this user could place
+      const maxBetForLiability = remainingLiability / lockedOdds;
       return NextResponse.json(
-        { error: "Liability limit reached for this horse" },
+        { error: "Liability limit reached for this horse", maxBet: Math.floor(maxBetForLiability * 100) / 100 },
         { status: 400 }
       );
     }
