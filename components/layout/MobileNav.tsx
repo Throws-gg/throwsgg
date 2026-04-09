@@ -68,21 +68,28 @@ export function MobileNav() {
       <div className="flex items-center justify-around h-14">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
+          const isGameTab = item.href === "/arena" || item.href === "/racing";
           return (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "flex flex-col items-center gap-0.5 px-4 py-1.5 text-[11px] font-medium transition-colors relative",
+                "flex flex-col items-center gap-0.5 px-4 py-1.5 text-[11px] font-semibold transition-colors relative",
                 isActive
                   ? "text-violet"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
               {isActive && (
-                <span className="absolute -top-px left-1/2 -translate-x-1/2 w-6 h-0.5 bg-violet rounded-full" />
+                <span className="absolute -top-px left-1/2 -translate-x-1/2 w-8 h-[3px] bg-violet rounded-full shadow-[0_0_8px_rgba(139,92,246,0.4)]" />
               )}
-              <item.Icon className="w-5 h-5" />
+              <div className="relative">
+                <item.Icon className="w-5 h-5" />
+                {/* Live betting indicator on game tabs */}
+                {isGameTab && !isActive && (
+                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+                )}
+              </div>
               <span>{item.label}</span>
             </Link>
           );

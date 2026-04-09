@@ -6,9 +6,9 @@ import { motion, AnimatePresence } from "framer-motion";
 type WinTier = "none" | "small" | "medium" | "big";
 
 function getWinTier(amount: number): WinTier {
-  if (amount >= 500) return "big";
-  if (amount >= 100) return "medium";
-  if (amount >= 50) return "small";
+  if (amount >= 100) return "big";
+  if (amount >= 25) return "medium";
+  if (amount >= 10) return "small";
   return "none";
 }
 
@@ -61,6 +61,12 @@ export function BigWinCelebration({
     setVisible(true);
     const duration = tier === "big" ? 4000 : tier === "medium" ? 3000 : 2000;
 
+    // Screen shake for big wins
+    if (tier === "big" || tier === "medium") {
+      document.body.classList.add("animate-screen-shake");
+      setTimeout(() => document.body.classList.remove("animate-screen-shake"), 400);
+    }
+
     const timeout = setTimeout(() => {
       setVisible(false);
       onComplete?.();
@@ -83,13 +89,15 @@ export function BigWinCelebration({
           {/* Big win overlay */}
           {tier === "big" && (
             <motion.div
-              className="fixed inset-0 z-[99] flex items-center justify-center pointer-events-none"
+              className="fixed inset-0 z-[99] flex items-center justify-center"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
+              {/* Backdrop */}
+              <div className="absolute inset-0 bg-black/40 pointer-events-none" />
               <motion.div
-                className="text-center"
+                className="text-center relative z-10"
                 initial={{ scale: 0, rotate: -10 }}
                 animate={{ scale: 1, rotate: 0 }}
                 exit={{ scale: 0, opacity: 0 }}
@@ -103,6 +111,29 @@ export function BigWinCelebration({
                     {username} ABSOLUTE UNIT
                   </div>
                 )}
+                {/* Share on X button */}
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  onClick={() => {
+                    const text = encodeURIComponent(
+                      `just hit +$${winAmount?.toFixed(2)} on @throwsgg LFG`
+                    );
+                    window.open(
+                      `https://x.com/intent/tweet?text=${text}`,
+                      "_blank"
+                    );
+                  }}
+                  className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl
+                    bg-white/10 border border-white/20 text-white text-sm font-bold
+                    hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                  Share on X
+                </motion.button>
               </motion.div>
             </motion.div>
           )}

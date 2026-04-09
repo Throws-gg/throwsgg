@@ -91,22 +91,41 @@ function CountdownDisplay({ time, phase }: { time: number; phase: RoundPhase }) 
     return (
       <motion.div key={`cd-${time}`} initial={{ scale: 3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.5, opacity: 0 }}
-        className="text-6xl sm:text-8xl font-black text-red drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">
-        {time}
+        className="relative">
+        {/* Pulsing ring behind countdown number */}
+        <motion.div className="absolute inset-0 -m-4 rounded-full border-2 border-red/40"
+          animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+          transition={{ duration: 0.8, repeat: Infinity }} />
+        <span className="text-6xl sm:text-8xl font-black text-red drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">
+          {time}
+        </span>
       </motion.div>
     );
   }
   // Betting — colour shifts as time runs out. Timer is THE most prominent element.
   const urgency = time <= 5 ? "critical" : time <= 10 ? "warning" : "normal";
   return (
-    <motion.div className={cn("font-mono font-black tabular-nums text-4xl sm:text-5xl",
-        urgency === "normal" && "text-foreground/80",
-        urgency === "warning" && "text-gold drop-shadow-[0_0_10px_rgba(245,158,11,0.3)]",
-        urgency === "critical" && "text-red drop-shadow-[0_0_15px_rgba(239,68,68,0.4)]")}
-      animate={urgency === "critical" ? { scale: [1, 1.1, 1] } : {}}
-      transition={urgency === "critical" ? { duration: 0.5, repeat: Infinity } : {}}>
-      0:{String(time).padStart(2, "0")}
-    </motion.div>
+    <div className="relative">
+      {/* Urgency pulse ring — visible in warning and critical */}
+      {urgency !== "normal" && (
+        <motion.div
+          className={cn("absolute inset-0 -m-3 rounded-full border-2",
+            urgency === "warning" && "border-gold/30",
+            urgency === "critical" && "border-red/40"
+          )}
+          animate={{ scale: [1, 1.4], opacity: [0.5, 0] }}
+          transition={{ duration: 1, repeat: Infinity }}
+        />
+      )}
+      <motion.div className={cn("font-mono font-black tabular-nums text-4xl sm:text-5xl relative",
+          urgency === "normal" && "text-foreground/80",
+          urgency === "warning" && "text-gold drop-shadow-[0_0_14px_rgba(245,158,11,0.4)]",
+          urgency === "critical" && "text-red drop-shadow-[0_0_20px_rgba(239,68,68,0.5)]")}
+        animate={urgency === "critical" ? { scale: [1, 1.08, 1] } : {}}
+        transition={urgency === "critical" ? { duration: 0.5, repeat: Infinity } : {}}>
+        0:{String(time).padStart(2, "0")}
+      </motion.div>
+    </div>
   );
 }
 

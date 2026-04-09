@@ -129,7 +129,7 @@ export default function RacingPage() {
             }
 
             // Big win celebration
-            if (totalWinPayout >= 50) {
+            if (totalWinPayout >= 10) {
               setBigWin({ amount: totalWinPayout, username: username || undefined });
             }
 
@@ -145,7 +145,7 @@ export default function RacingPage() {
                     payout: topWinBet.payout || 0,
                     gatePosition: entry.gatePosition,
                   });
-                }, totalWinPayout >= 50 ? 2500 : 800);
+                }, totalWinPayout >= 10 ? 2500 : 800);
               }
             }
 
@@ -215,12 +215,20 @@ export default function RacingPage() {
             <span>{currentRace.entries.length} runners</span>
           </div>
         </div>
-        <div className="text-right">
+        <div className="text-right relative">
+          {/* Urgency pulse ring for betting timer */}
+          {isBetting && timeRemaining <= 10 && (
+            <div className={cn(
+              "absolute -inset-2 rounded-xl border-2 animate-ping",
+              timeRemaining <= 5 ? "border-red/30" : "border-gold/20"
+            )} style={{ animationDuration: "1.5s" }} />
+          )}
           <div className={cn(
-            "font-mono text-2xl font-black tabular-nums",
+            "font-mono font-black tabular-nums relative",
+            isBetting ? "text-3xl" : "text-2xl",
             isBetting && timeRemaining > 15 && "text-foreground/80",
-            isBetting && timeRemaining <= 15 && timeRemaining > 5 && "text-gold",
-            isBetting && timeRemaining <= 5 && "text-red",
+            isBetting && timeRemaining <= 15 && timeRemaining > 5 && "text-gold drop-shadow-[0_0_10px_rgba(245,158,11,0.3)]",
+            isBetting && timeRemaining <= 5 && "text-red drop-shadow-[0_0_15px_rgba(239,68,68,0.4)]",
             phase === "closed" && "text-gold",
             isRacing && "text-green",
             isResults && "text-muted-foreground"
@@ -233,35 +241,33 @@ export default function RacingPage() {
         </div>
       </div>
 
-      {/* 2D Race Canvas — show during closed (idle at gates), racing, and results */}
-      {(phase === "closed" || isRacing || isResults) && (
-        <div className={cn(isResults && "hidden", "relative")}>
-          <RaceCanvas
-            entries={currentRace.entries}
-            checkpoints={currentRace.checkpoints}
-            phase={phase}
-            timeRemaining={timeRemaining}
-            raceDuration={RACE_TIMING.RACE_DURATION}
-            ground={currentRace.ground}
-          />
-          {/* Countdown overlay during gates closed */}
-          {phase === "closed" && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <div className={cn(
-                  "font-mono font-black tabular-nums text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]",
-                  timeRemaining <= 3 ? "text-5xl" : "text-3xl",
-                  timeRemaining <= 3 && "text-gold animate-pulse"
-                )}>
-                  {timeRemaining}
-                </div>
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/60 font-bold mt-1 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
-                  {timeRemaining <= 3 ? "STARTING" : "GATES LOADING"}
-                </p>
-              </div>
+      {/* Gates countdown — shown during closed phase */}
+      {phase === "closed" && (
+        <div className="rounded-2xl border border-white/[0.06] bg-[#0a0a12] flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className={cn(
+              "font-mono font-black tabular-nums text-white",
+              timeRemaining <= 3 ? "text-6xl text-gold animate-pulse" : "text-4xl"
+            )}>
+              {timeRemaining}
             </div>
-          )}
+            <p className="text-xs uppercase tracking-[0.2em] text-white/40 font-bold mt-2">
+              {timeRemaining <= 3 ? "STARTING" : "GATES LOADING"}
+            </p>
+          </div>
         </div>
+      )}
+
+      {/* 2D Race Canvas — only during actual racing */}
+      {isRacing && currentRace.checkpoints && (
+        <RaceCanvas
+          entries={currentRace.entries}
+          checkpoints={currentRace.checkpoints}
+          phase={phase}
+          timeRemaining={timeRemaining}
+          raceDuration={RACE_TIMING.RACE_DURATION}
+          ground={currentRace.ground}
+        />
       )}
 
       {/* Race card — hidden during closed (canvas showing) and racing */}
@@ -285,30 +291,34 @@ export default function RacingPage() {
               onClick={() => isBetting ? setSelectedHorse(entry) : null}
               disabled={!isBetting}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 transition-all text-left",
-                isResults && entry.finishPosition === 1 && !isRacing && "bg-green/[0.04]",
-                isBetting && "hover:bg-white/[0.03] active:bg-white/[0.05]"
+                "group w-full flex items-center gap-3 pr-4 py-3 transition-all text-left relative",
+                isResults && entry.finishPosition === 1 && !isRacing && "bg-green/[0.06]",
+                isBetting && "hover:bg-white/[0.04] active:bg-white/[0.06]"
               )}
             >
+              {/* Left colour bar */}
+              <div className="w-[3px] self-stretch rounded-r-full shrink-0"
+                style={{ backgroundColor: entry.horse.color, opacity: isResults && entry.finishPosition !== 1 ? 0.3 : 0.7 }} />
+
               <HorseSprite slug={entry.horse.slug} size={32} className="shrink-0" />
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold text-white/40 shrink-0"
+                  <span className="text-[10px] font-bold shrink-0"
                     style={{ color: entry.horse.color }}>
                     {entry.gatePosition}.
                   </span>
                   <span className="text-sm font-semibold truncate">{entry.horse.name}</span>
                   {isResults && !isRacing && entry.finishPosition === 1 && (
-                    <span className="text-[10px] bg-green/20 text-green px-1 py-0.5 rounded font-bold">WIN</span>
+                    <span className="text-[10px] bg-green/20 text-green px-1.5 py-0.5 rounded font-bold">WIN</span>
                   )}
                 </div>
                 <p className="text-[10px] text-white/30 italic truncate ml-3.5">{getHorseIdentity(entry.horse.slug).tagline}</p>
               </div>
 
-              <div className="text-right shrink-0">
+              <div className="text-right shrink-0 flex items-center gap-2">
                 {isResults && !isRacing && entry.finishPosition ? (
-                  <div className="flex items-center gap-2">
+                  <>
                     <span className="text-[11px] font-mono text-white/35">{entry.currentOdds.toFixed(2)}</span>
                     <span className={cn("text-lg font-black",
                       entry.finishPosition === 1 && "text-green",
@@ -320,15 +330,23 @@ export default function RacingPage() {
                         {entry.finishPosition === 1 ? "st" : entry.finishPosition === 2 ? "nd" : entry.finishPosition === 3 ? "rd" : "th"}
                       </span>
                     </span>
-                  </div>
+                  </>
                 ) : (
-                  <span className={cn("text-lg font-black font-mono",
-                    entry.currentOdds < 3 && "text-red/80",
-                    entry.currentOdds >= 3 && entry.currentOdds < 8 && "text-white/70",
-                    entry.currentOdds >= 8 && "text-green/80"
-                  )}>
-                    {entry.currentOdds.toFixed(2)}
-                  </span>
+                  <>
+                    <span className={cn("text-lg font-black font-mono",
+                      entry.currentOdds < 3 && "text-amber-400",
+                      entry.currentOdds >= 3 && entry.currentOdds < 8 && "text-white/80",
+                      entry.currentOdds >= 8 && "text-green"
+                    )}>
+                      {entry.currentOdds.toFixed(2)}
+                    </span>
+                    {/* BET affordance on hover */}
+                    {isBetting && (
+                      <span className="text-[9px] text-violet/0 group-hover:text-violet/70 transition-colors font-bold uppercase w-6">
+                        BET
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </button>
@@ -565,17 +583,12 @@ function HorseBetCard({
 
         {/* Header — name, gate, odds */}
         <div className="flex items-center gap-3">
-          <div className="relative shrink-0">
-            <HorseSprite slug={h.slug} size={44} />
-            <div
-              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white border border-black/30"
-              style={{ backgroundColor: h.color, boxShadow: `0 0 12px ${h.color}30` }}
-            >
-              {entry.gatePosition}
-            </div>
-          </div>
+          <HorseSprite slug={h.slug} size={48} className="shrink-0" />
           <div className="flex-1">
-            <h3 className="text-base font-bold text-white">{h.name}</h3>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold" style={{ color: h.color }}>{entry.gatePosition}.</span>
+              <h3 className="text-base font-bold text-white">{h.name}</h3>
+            </div>
             <p className="text-[10px] text-white/40 italic">{getHorseIdentity(h.slug).tagline}</p>
           </div>
           <div className="text-right">

@@ -35,10 +35,12 @@ function BalanceDisplay() {
   const userId = useUserStore((s) => s.userId);
   if (!userId) return null;
   return (
-    <div className="flex items-center gap-1.5 bg-secondary/80 rounded-lg px-3 py-1.5 border border-border">
-      <span className="text-muted-foreground text-sm">$</span>
-      <span className="font-mono font-bold text-sm tabular-nums text-foreground">
-        {balance.toFixed(2)}
+    <div className="flex items-center gap-1.5 rounded-lg px-3 py-1.5
+      bg-gradient-to-r from-violet/10 to-magenta/10
+      border border-violet/25
+      shadow-[0_0_12px_rgba(139,92,246,0.12)]">
+      <span className="text-green font-mono font-black text-sm tabular-nums">
+        ${balance.toFixed(2)}
       </span>
     </div>
   );
@@ -114,9 +116,11 @@ export function Navbar() {
             <Link href="/wallet">
               <Button
                 size="sm"
-                className="bg-green/15 text-green border border-green/30 hover:bg-green/25 text-xs font-bold"
+                className="bg-green text-black font-black text-xs px-3
+                  hover:bg-green/90 active:scale-95
+                  animate-deposit-glow"
               >
-                + deposit
+                + DEPOSIT
               </Button>
             </Link>
           )}

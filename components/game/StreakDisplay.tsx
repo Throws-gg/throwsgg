@@ -79,35 +79,27 @@ export function StreakDisplay({ recentResults }: StreakDisplayProps) {
         </div>
       )}
 
-      {/* Results strip — letters in winner's colour */}
-      <div className="flex items-center gap-0.5 overflow-x-auto py-1">
+      {/* Results strip — coloured dots for quick scanning */}
+      <div className="flex items-center gap-1 overflow-x-auto py-1">
         <span className="text-[10px] text-muted-foreground mr-1 shrink-0 font-bold uppercase">
           Last {recentResults.length}:
         </span>
-        {recentResults.map((r, i) => {
-          const letter = r.winningMove
-            ? MOVE_LETTER[r.winningMove]
-            : "D";
-
-          return (
-            <span
-              key={i}
-              className={cn(
-                "text-[11px] font-black shrink-0 w-4 text-center",
-                r.result === "violet_win" && "text-violet",
-                r.result === "magenta_win" && "text-magenta",
-                r.result === "draw" && "text-cyan"
-              )}
-              title={
-                r.result === "draw"
-                  ? "Draw"
-                  : `${r.result === "violet_win" ? "Bull" : "Bear"} won with ${r.winningMove}`
-              }
-            >
-              {letter}
-            </span>
-          );
-        })}
+        {recentResults.map((r, i) => (
+          <span
+            key={i}
+            className={cn(
+              "w-2.5 h-2.5 rounded-full shrink-0 inline-block",
+              r.result === "violet_win" && "bg-violet",
+              r.result === "magenta_win" && "bg-magenta",
+              r.result === "draw" && "bg-cyan"
+            )}
+            title={
+              r.result === "draw"
+                ? "Draw"
+                : `${r.result === "violet_win" ? "Bull" : "Bear"} won with ${r.winningMove}`
+            }
+          />
+        ))}
       </div>
 
       {/* Win distribution bar */}

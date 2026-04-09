@@ -139,7 +139,7 @@ export default function ArenaPage() {
             // Sound + celebration
             if (serverBet.status === "won") {
               playWin(payout);
-              if (payout >= 50) {
+              if (payout >= 10) {
                 setBigWin({ amount: payout, username: username || undefined });
               }
             } else if (serverBet.status === "lost") {

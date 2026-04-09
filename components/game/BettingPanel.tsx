@@ -78,13 +78,13 @@ export function BettingPanel({
     if (isDraw && spot.category === "player") return "bg-cyan/10 border-cyan/30";
     if (isLoser) return "bg-secondary/20 border-border opacity-35";
     if (hasChips && !betsLocked) {
-      if (spot.color === "violet") return "bg-violet/15 border-violet";
-      if (spot.color === "magenta") return "bg-magenta/15 border-magenta";
-      return "bg-cyan/10 border-cyan";
+      if (spot.color === "violet") return "bg-gradient-to-b from-violet/20 to-violet/8 border-violet shadow-[0_0_16px_rgba(139,92,246,0.2)]";
+      if (spot.color === "magenta") return "bg-gradient-to-b from-magenta/20 to-magenta/8 border-magenta shadow-[0_0_16px_rgba(236,72,153,0.2)]";
+      return "bg-gradient-to-b from-cyan/15 to-cyan/5 border-cyan shadow-[0_0_16px_rgba(6,182,212,0.15)]";
     }
-    if (spot.color === "violet") return "bg-violet/5 border-violet/25 hover:border-violet/50 hover:bg-violet/10";
-    if (spot.color === "magenta") return "bg-magenta/5 border-magenta/25 hover:border-magenta/50 hover:bg-magenta/10";
-    return "bg-secondary/60 border-border hover:border-violet/30 hover:bg-secondary";
+    if (spot.color === "violet") return "bg-gradient-to-b from-violet/8 to-violet/3 border-violet/25 hover:border-violet/50 hover:from-violet/12 hover:to-violet/5 hover:shadow-[inset_0_1px_0_rgba(139,92,246,0.15)]";
+    if (spot.color === "magenta") return "bg-gradient-to-b from-magenta/8 to-magenta/3 border-magenta/25 hover:border-magenta/50 hover:from-magenta/12 hover:to-magenta/5 hover:shadow-[inset_0_1px_0_rgba(236,72,153,0.15)]";
+    return "bg-gradient-to-b from-white/[0.05] to-white/[0.01] border-[rgba(255,255,255,0.1)] hover:border-violet/30 hover:from-violet/[0.08] hover:to-violet/[0.02] hover:shadow-[inset_0_1px_0_rgba(139,92,246,0.15)]";
   };
 
   return (
@@ -106,11 +106,12 @@ export function BettingPanel({
             return (
               <button key={spot.type} onClick={() => handleTapSpot(spot.type)}
                 disabled={betsLocked && !isResults}
-                className={cn("rounded-lg p-1.5 sm:p-2 text-center transition-all border active:scale-95 relative",
+                className={cn("rounded-xl p-2 sm:p-2.5 text-center transition-all border relative min-h-[52px] sm:min-h-[60px]",
+                  "active:scale-90 active:brightness-125 transition-[transform,filter,background,border,box-shadow] duration-75",
                   getSpotStyle(spot), betsLocked && !isResults && "cursor-not-allowed")}>
                 <Image src={spot.icon} alt={spot.label} width={32} height={32}
-                  className="mx-auto w-7 h-7 sm:w-9 sm:h-9 object-contain" />
-                <span className={cn("block text-[9px] sm:text-[10px] font-semibold mt-0.5",
+                  className="mx-auto w-8 h-8 sm:w-10 sm:h-10 object-contain" />
+                <span className={cn("block text-[9px] sm:text-[11px] font-bold mt-0.5",
                   isWin ? (winnerColor === "violet" ? "text-violet" : "text-magenta")
                     : isResults && !winningMove && spot.type === "draw" ? "text-cyan"
                     : "text-foreground/70")}>
@@ -118,8 +119,9 @@ export function BettingPanel({
                 </span>
                 <AnimatePresence>
                   {amount > 0 && (
-                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
-                      className="absolute -top-1.5 -right-1.5 bg-cyan text-black text-[8px] font-black rounded-full min-w-[22px] h-4 flex items-center justify-center px-0.5">
+                    <motion.div initial={{ scale: 0 }} animate={{ scale: [0, 1.2, 1] }} exit={{ scale: 0 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 15 }}
+                      className="absolute -top-2 -right-2 bg-cyan text-black text-[9px] font-black rounded-full min-w-[28px] h-5 flex items-center justify-center px-1 shadow-[0_0_8px_rgba(6,182,212,0.4)]">
                       ${amount}
                     </motion.div>
                   )}
@@ -149,12 +151,13 @@ export function BettingPanel({
             return (
               <button key={spot.type} onClick={() => handleTapSpot(spot.type)}
                 disabled={betsLocked && !isResults}
-                className={cn("rounded-lg p-2 sm:p-3 text-center transition-all border font-bold active:scale-95 relative",
+                className={cn("rounded-xl p-2.5 sm:p-3.5 text-center transition-all border font-bold relative min-h-[48px]",
+                  "active:scale-90 active:brightness-125 transition-[transform,filter,background,border,box-shadow] duration-75",
                   getSpotStyle(spot), betsLocked && !isResults && "cursor-not-allowed")}>
-                <div className="flex items-center justify-center gap-1.5">
+                <div className="flex items-center justify-center gap-2">
                   <Image src={spot.icon} alt={spot.label} width={24} height={24}
-                    className="w-5 h-5 sm:w-7 sm:h-7 object-contain" />
-                  <span className={cn("text-sm sm:text-base font-bold",
+                    className="w-6 h-6 sm:w-8 sm:h-8 object-contain" />
+                  <span className={cn("text-sm sm:text-base font-black",
                     isResults && roundResult === "draw" ? "text-cyan"
                       : spot.color === "violet" ? "text-violet" : "text-magenta")}>
                     {spot.label}{isWin && " ✓"}
@@ -162,10 +165,11 @@ export function BettingPanel({
                 </div>
                 <AnimatePresence>
                   {amount > 0 && (
-                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
-                      className={cn("absolute -top-1.5 -right-1.5 text-white text-[8px] font-black rounded-full min-w-[22px] h-4 flex items-center justify-center px-0.5",
-                        spot.color === "violet" ? "bg-violet"
-                          : "bg-magenta")}>
+                    <motion.div initial={{ scale: 0 }} animate={{ scale: [0, 1.2, 1] }} exit={{ scale: 0 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 15 }}
+                      className={cn("absolute -top-2 -right-2 text-white text-[9px] font-black rounded-full min-w-[28px] h-5 flex items-center justify-center px-1",
+                        spot.color === "violet" ? "bg-violet shadow-[0_0_8px_rgba(139,92,246,0.4)]"
+                          : "bg-magenta shadow-[0_0_8px_rgba(236,72,153,0.4)]")}>
                       ${amount}
                     </motion.div>
                   )}
@@ -186,10 +190,11 @@ export function BettingPanel({
             {CHIPS.map((chip) => (
               <button key={chip} onClick={() => setSelectedChip(chip)}
                 disabled={balance < chip}
-                className={cn("flex-1 py-1.5 sm:py-2 rounded-lg text-[11px] sm:text-xs font-black transition-all border active:scale-95",
+                className={cn("flex-1 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black border",
+                  "active:scale-90 active:brightness-125 transition-[transform,filter,background,border,box-shadow] duration-75",
                   selectedChip === chip
-                    ? "bg-violet/15 border-violet text-violet scale-[1.03]"
-                    : "bg-secondary/80 border-border text-foreground/70 hover:border-foreground/20",
+                    ? "bg-violet/15 border-violet text-violet scale-[1.03] shadow-[0_0_10px_rgba(139,92,246,0.2)]"
+                    : "bg-secondary/80 border-[rgba(255,255,255,0.1)] text-foreground/70 hover:border-foreground/20",
                   balance < chip && "opacity-25 cursor-not-allowed")}>
                 ${chip}
               </button>
