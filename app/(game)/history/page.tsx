@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { RaceWinCard } from "@/components/racing/RaceWinCard";
 import { useUserStore } from "@/stores/userStore";
 import type { Horse } from "@/lib/racing/constants";
 
-// ======= TYPES & MOCK DATA =======
+// ======= TYPES =======
 
-type BetResult = "won" | "lost";
+type BetResult = "won" | "lost" | "pending" | "cancelled";
 type BetType = "win" | "place" | "show";
 
 interface HistoryBet {
@@ -23,21 +23,10 @@ interface HistoryBet {
   payout: number;
   result: BetResult;
   raceNumber: number;
+  distance: number;
+  ground: string;
   timestamp: string;
 }
-
-const MOCK_BETS: HistoryBet[] = [
-  { id: "1", horseName: "Moon Shot", horseSlug: "moon-shot", horseColor: "#FBBF24", betType: "win", odds: 3.16, stake: 10, payout: 31.60, result: "won", raceNumber: 1284, timestamp: "2026-04-09T14:22:00Z" },
-  { id: "2", horseName: "Thunder Edge", horseSlug: "thunder-edge", horseColor: "#8B5CF6", betType: "place", odds: 1.85, stake: 25, payout: 0, result: "lost", raceNumber: 1283, timestamp: "2026-04-09T14:19:00Z" },
-  { id: "3", horseName: "Rug Pull", horseSlug: "rug-pull", horseColor: "#EC4899", betType: "win", odds: 12.80, stake: 5, payout: 64.00, result: "won", raceNumber: 1281, timestamp: "2026-04-09T14:13:00Z" },
-  { id: "4", horseName: "Crown Jewel", horseSlug: "crown-jewel", horseColor: "#22C55E", betType: "show", odds: 1.35, stake: 50, payout: 67.50, result: "won", raceNumber: 1280, timestamp: "2026-04-09T14:10:00Z" },
-  { id: "5", horseName: "Night Fury", horseSlug: "night-fury", horseColor: "#EF4444", betType: "win", odds: 5.80, stake: 10, payout: 0, result: "lost", raceNumber: 1279, timestamp: "2026-04-09T14:07:00Z" },
-  { id: "6", horseName: "Paper Hands", horseSlug: "paper-hands", horseColor: "#F59E0B", betType: "win", odds: 6.50, stake: 5, payout: 0, result: "lost", raceNumber: 1278, timestamp: "2026-04-09T14:04:00Z" },
-  { id: "7", horseName: "Dead Cat", horseSlug: "dead-cat", horseColor: "#64748B", betType: "place", odds: 3.20, stake: 15, payout: 48.00, result: "won", raceNumber: 1276, timestamp: "2026-04-09T13:58:00Z" },
-  { id: "8", horseName: "Iron Phantom", horseSlug: "iron-phantom", horseColor: "#06B6D4", betType: "win", odds: 4.20, stake: 20, payout: 0, result: "lost", raceNumber: 1275, timestamp: "2026-04-09T13:55:00Z" },
-  { id: "9", horseName: "Moon Shot", horseSlug: "moon-shot", horseColor: "#FBBF24", betType: "win", odds: 2.90, stake: 25, payout: 72.50, result: "won", raceNumber: 1274, timestamp: "2026-04-09T13:52:00Z" },
-  { id: "10", horseName: "Volt Runner", horseSlug: "volt-runner", horseColor: "#8B5CF6", betType: "show", odds: 1.40, stake: 100, payout: 0, result: "lost", raceNumber: 1273, timestamp: "2026-04-09T13:49:00Z" },
-];
 
 type Filter = "all" | "won" | "lost";
 
@@ -46,16 +35,6 @@ type Filter = "all" | "won" | "lost";
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) return "Today";
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 // ======= MAIN PAGE =======
@@ -73,23 +52,48 @@ function betToHorse(bet: HistoryBet): Horse {
 
 export default function HistoryPage() {
   const [filter, setFilter] = useState<Filter>("all");
+  const [bets, setBets] = useState<HistoryBet[]>([]);
+  const [loading, setLoading] = useState(true);
   const [shareWinBet, setShareWinBet] = useState<HistoryBet | null>(null);
+  const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
 
+  const fetchHistory = useCallback(async () => {
+    if (!userId) { setLoading(false); return; }
+    try {
+      const res = await fetch(`/api/race/bet/history?userId=${userId}&limit=100`);
+      const data = await res.json();
+      if (data.bets) setBets(data.bets);
+    } catch { /* silent */ }
+    setLoading(false);
+  }, [userId]);
+
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  const settledBets = useMemo(() => bets.filter(b => b.result === "won" || b.result === "lost"), [bets]);
+
   const filteredBets = useMemo(() => {
-    if (filter === "all") return MOCK_BETS;
-    return MOCK_BETS.filter(b => b.result === filter);
-  }, [filter]);
+    if (filter === "all") return settledBets;
+    return settledBets.filter(b => b.result === filter);
+  }, [filter, settledBets]);
 
   // Summary stats
   const stats = useMemo(() => {
-    const total = MOCK_BETS.length;
-    const wins = MOCK_BETS.filter(b => b.result === "won").length;
-    const totalStaked = MOCK_BETS.reduce((sum, b) => sum + b.stake, 0);
-    const totalPayout = MOCK_BETS.reduce((sum, b) => sum + b.payout, 0);
+    const total = settledBets.length;
+    const wins = settledBets.filter(b => b.result === "won").length;
+    const totalStaked = settledBets.reduce((sum, b) => sum + b.stake, 0);
+    const totalPayout = settledBets.reduce((sum, b) => sum + b.payout, 0);
     const netPL = totalPayout - totalStaked;
     return { total, wins, winRate: total > 0 ? (wins / total) * 100 : 0, netPL };
-  }, []);
+  }, [settledBets]);
+
+  if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><p className="text-muted-foreground">Loading history...</p></div>;
+
+  if (!userId) return (
+    <div className="flex items-center justify-center min-h-[50vh]">
+      <p className="text-muted-foreground">Sign in to view your bet history</p>
+    </div>
+  );
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] pb-20 md:pb-8">
@@ -139,9 +143,9 @@ export default function HistoryPage() {
           className="flex rounded-xl bg-white/[0.03] border border-white/[0.06] p-1"
         >
           {([
-            { key: "all" as Filter, label: "All", count: MOCK_BETS.length },
-            { key: "won" as Filter, label: "Wins", count: MOCK_BETS.filter(b => b.result === "won").length },
-            { key: "lost" as Filter, label: "Losses", count: MOCK_BETS.filter(b => b.result === "lost").length },
+            { key: "all" as Filter, label: "All", count: settledBets.length },
+            { key: "won" as Filter, label: "Wins", count: settledBets.filter(b => b.result === "won").length },
+            { key: "lost" as Filter, label: "Losses", count: settledBets.filter(b => b.result === "lost").length },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -312,8 +316,8 @@ export default function HistoryPage() {
             lockedOdds={shareWinBet.odds}
             payout={shareWinBet.payout}
             raceNumber={shareWinBet.raceNumber}
-            distance={1200}
-            ground="good"
+            distance={shareWinBet.distance}
+            ground={shareWinBet.ground}
             gatePosition={1}
             username={username || "anon"}
             onClose={() => setShareWinBet(null)}

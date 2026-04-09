@@ -1,0 +1,58 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+/**
+ * GET /api/race/bet/history?userId=xxx&limit=50&offset=0
+ * Returns the user's race bet history with horse and race data.
+ */
+export async function GET(request: NextRequest) {
+  const supabase = createAdminClient();
+  const { searchParams } = new URL(request.url);
+
+  const userId = searchParams.get("userId");
+  const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
+  const offset = parseInt(searchParams.get("offset") || "0");
+
+  if (!userId) {
+    return NextResponse.json({ error: "userId required" }, { status: 400 });
+  }
+
+  const { data, error } = await supabase
+    .from("race_bets")
+    .select(
+      "id, amount, locked_odds, potential_payout, payout, status, bet_type, created_at, settled_at, horse_id, race_id, horses(name, slug, color), races(race_number, distance, ground)"
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error("Race bet history error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch bet history" },
+      { status: 500 }
+    );
+  }
+
+  const bets = (data || []).map((b) => {
+    const horse = b.horses as unknown as { name: string; slug: string; color: string } | null;
+    const race = b.races as unknown as { race_number: number; distance: number; ground: string } | null;
+    return {
+      id: b.id,
+      horseName: horse?.name || "Unknown",
+      horseSlug: horse?.slug || "",
+      horseColor: horse?.color || "#888",
+      betType: b.bet_type || "win",
+      odds: parseFloat(b.locked_odds),
+      stake: parseFloat(b.amount),
+      payout: b.payout ? parseFloat(b.payout) : 0,
+      result: b.status as string,
+      raceNumber: race?.race_number || 0,
+      distance: race?.distance || 1200,
+      ground: race?.ground || "good",
+      timestamp: b.created_at,
+    };
+  });
+
+  return NextResponse.json({ bets });
+}
