@@ -4,11 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-function ArenaIcon({ className }: { className?: string }) {
+function ReferralIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 6v6l4 2" />
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }
@@ -54,9 +56,9 @@ function RacingIcon({ className }: { className?: string }) {
 }
 
 const navItems = [
-  { href: "/arena", label: "rps", Icon: ArenaIcon },
   { href: "/racing", label: "racing", Icon: RacingIcon },
   { href: "/history", label: "history", Icon: HistoryIcon },
+  { href: "/referrals", label: "referrals", Icon: ReferralIcon },
   { href: "/wallet", label: "wallet", Icon: WalletIcon },
 ];
 
@@ -68,7 +70,7 @@ export function MobileNav() {
       <div className="flex items-center justify-around h-14">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
-          const isGameTab = item.href === "/arena" || item.href === "/racing";
+          const isGameTab = item.href === "/racing";
           return (
             <Link
               key={item.href}

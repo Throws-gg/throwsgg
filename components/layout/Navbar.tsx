@@ -91,6 +91,12 @@ function UserMenu() {
         >
           bet history
         </DropdownMenuItem>
+        <DropdownMenuItem
+          className="cursor-pointer"
+          onClick={() => router.push("/referrals")}
+        >
+          referrals
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="cursor-pointer text-red"
