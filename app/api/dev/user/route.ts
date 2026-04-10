@@ -30,9 +30,24 @@ export async function POST(request: NextRequest) {
         balance: parseFloat(existing.balance),
         totalWagered: parseFloat(existing.total_wagered),
         totalProfit: parseFloat(existing.total_profit),
+        referralCode: existing.referral_code,
       },
     });
   }
+
+  // Look up referrer if a code was provided
+  let referrerId: string | null = null;
+  if (body.referralCode) {
+    const { data: referrer } = await supabase
+      .from("users")
+      .select("id")
+      .eq("referral_code", body.referralCode.trim().toUpperCase())
+      .single();
+    if (referrer) referrerId = referrer.id;
+  }
+
+  // Generate a unique referral code
+  const { data: newCode } = await supabase.rpc("generate_referral_code");
 
   // Create test user
   const { data: newUser, error } = await supabase
@@ -42,6 +57,8 @@ export async function POST(request: NextRequest) {
       username,
       balance: 1000, // $1,000 test balance
       role: "player",
+      referral_code: newCode,
+      referrer_id: referrerId,
     })
     .select()
     .single();
@@ -60,6 +77,7 @@ export async function POST(request: NextRequest) {
       balance: parseFloat(newUser.balance),
       totalWagered: parseFloat(newUser.total_wagered),
       totalProfit: parseFloat(newUser.total_profit),
+      referralCode: newUser.referral_code,
     },
   });
 }

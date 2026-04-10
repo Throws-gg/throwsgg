@@ -1,51 +1,128 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
-import { motion } from "framer-motion";
+import { useState, useCallback, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
 import { cn } from "@/lib/utils";
 
-// ======= MOCK DATA =======
+// ======= TYPES =======
 
-const MOCK_REFERRALS = [
-  { username: "moonboy_42", joinedAt: "2026-04-01", totalWagered: 1240, earnings: 18.60, status: "active" as const },
-  { username: "rugsurvivr", joinedAt: "2026-03-28", totalWagered: 860, earnings: 12.90, status: "active" as const },
-  { username: "degenape", joinedAt: "2026-03-25", totalWagered: 320, earnings: 4.80, status: "active" as const },
-  { username: "sol_whale", joinedAt: "2026-04-05", totalWagered: 0, earnings: 0, status: "pending" as const },
-];
+interface ReferralEntry {
+  id: string;
+  username: string;
+  joinedAt: string;
+  totalWagered: number;
+  earnings: number;
+  status: "active" | "pending";
+}
+
+interface ReferralsData {
+  referralCode: string;
+  stats: {
+    totalReferrals: number;
+    activeReferrals: number;
+    pendingEarnings: number;
+    lifetimeEarned: number;
+  };
+  referrals: ReferralEntry[];
+}
 
 // ======= MAIN PAGE =======
 
 export default function ReferralsPage() {
-  const { userId, username } = useUserStore();
+  const userId = useUserStore((s) => s.userId);
+  const setBalance = useUserStore((s) => s.setBalance);
+
+  const [data, setData] = useState<ReferralsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [claiming, setClaiming] = useState(false);
+  const [claimResult, setClaimResult] = useState<{ amount: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Generate referral code from username
-  const referralCode = useMemo(() => {
-    if (!username) return "XXXXXX";
-    return username.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase();
-  }, [username]);
+  // Fetch referrals data
+  const fetchData = useCallback(async () => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/referrals/me?userId=${userId}`);
+      const json = await res.json();
+      if (res.ok) setData(json);
+    } catch {
+      // silent
+    }
+    setLoading(false);
+  }, [userId]);
 
-  const referralLink = `throws.gg/r/${referralCode}`;
-  const fullReferralLink = `https://throws.gg/r/${referralCode}`;
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const referralCode = data?.referralCode || "";
+  const referralLink = referralCode ? `throws.gg/r/${referralCode}` : "";
+  const fullReferralLink = referralCode ? `https://throws.gg/r/${referralCode}` : "";
 
   const handleCopy = useCallback(() => {
+    if (!fullReferralLink) return;
     navigator.clipboard.writeText(fullReferralLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [fullReferralLink]);
 
   const handleShareX = useCallback(() => {
+    if (!fullReferralLink) return;
     const text = encodeURIComponent(
-      `bet on AI horse racing at throws.gg\n\nnew race every 3 min, provably fair, crypto-native\n\nuse my link for a bonus: ${fullReferralLink}`
+      `bet on AI horse racing at throws.gg\n\nnew race every 3 min, provably fair, crypto-native\n\nuse my link: ${fullReferralLink}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   }, [fullReferralLink]);
 
-  // Stats
-  const totalReferrals = MOCK_REFERRALS.length;
-  const totalEarned = MOCK_REFERRALS.reduce((sum, r) => sum + r.earnings, 0);
-  const pendingEarnings = MOCK_REFERRALS.filter(r => r.status === "active").reduce((sum, r) => sum + r.earnings * 0.1, 0);
+  const handleClaim = useCallback(async () => {
+    if (!userId || claiming || !data) return;
+    if (data.stats.pendingEarnings < 0.01) return;
+
+    setClaiming(true);
+    try {
+      const res = await fetch("/api/referrals/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setClaimResult({ amount: json.claimed });
+        setBalance(json.newBalance);
+        // Refresh data to show zeroed earnings
+        await fetchData();
+        // Hide success message after 3s
+        setTimeout(() => setClaimResult(null), 3000);
+      }
+    } catch {
+      // silent
+    }
+    setClaiming(false);
+  }, [userId, claiming, data, setBalance, fetchData]);
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="w-5 h-5 border-2 border-violet/40 border-t-violet rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Not signed in
+  if (!userId || !data) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <p className="text-muted-foreground text-sm">Sign in to view your referrals</p>
+      </div>
+    );
+  }
+
+  const { stats, referrals } = data;
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] pb-20 md:pb-8">
@@ -130,18 +207,69 @@ export default function ReferralsPage() {
           className="grid grid-cols-3 gap-3"
         >
           <div className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-4 text-center">
-            <p className="text-2xl font-black font-mono tabular-nums text-white">{totalReferrals}</p>
+            <p className="text-2xl font-black font-mono tabular-nums text-white">{stats.totalReferrals}</p>
             <p className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Referrals</p>
           </div>
           <div className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-4 text-center">
-            <p className="text-2xl font-black font-mono tabular-nums text-green">${totalEarned.toFixed(2)}</p>
-            <p className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Earned</p>
+            <p className="text-2xl font-black font-mono tabular-nums text-green">
+              ${stats.lifetimeEarned.toFixed(2)}
+            </p>
+            <p className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Lifetime</p>
           </div>
           <div className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-4 text-center">
-            <p className="text-2xl font-black font-mono tabular-nums text-gold">${pendingEarnings.toFixed(2)}</p>
+            <p className="text-2xl font-black font-mono tabular-nums text-gold">
+              ${stats.pendingEarnings.toFixed(2)}
+            </p>
             <p className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Pending</p>
           </div>
         </motion.div>
+
+        {/* ===== CLAIM BUTTON ===== */}
+        {stats.pendingEarnings >= 0.01 && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+          >
+            <button
+              onClick={handleClaim}
+              disabled={claiming}
+              className={cn(
+                "w-full py-3.5 rounded-xl font-black text-sm transition-all active:scale-[0.99]",
+                "bg-gradient-to-r from-green to-green/80 text-black",
+                "shadow-[0_4px_20px_rgba(52,211,153,0.25)]",
+                "hover:opacity-90",
+                claiming && "opacity-60 cursor-not-allowed"
+              )}
+            >
+              {claiming ? "Claiming..." : `Claim $${stats.pendingEarnings.toFixed(2)} to Balance`}
+            </button>
+          </motion.div>
+        )}
+
+        {/* ===== CLAIM SUCCESS TOAST ===== */}
+        <AnimatePresence>
+          {claimResult && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              className="rounded-xl border border-green/30 bg-green/[0.08] px-4 py-3 flex items-center gap-3"
+            >
+              <div className="w-8 h-8 rounded-full bg-green/20 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-green text-sm font-bold">
+                  +${claimResult.amount.toFixed(2)} added to balance
+                </p>
+                <p className="text-[10px] text-white/40">Ready to bet</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ===== HOW IT WORKS ===== */}
         <motion.div
@@ -202,20 +330,20 @@ export default function ReferralsPage() {
           </div>
           <div className="space-y-2 text-[12px] text-white/35 leading-relaxed">
             <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-              <span>Base commission rate</span>
-              <span className="font-bold text-green font-mono">5%</span>
+              <span>Commission rate</span>
+              <span className="font-bold text-green font-mono">5% of house edge</span>
             </div>
             <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-              <span>Commission calculated on</span>
-              <span className="text-white/50 font-medium">House edge per bet</span>
+              <span>Paid on</span>
+              <span className="text-white/50 font-medium">Every settled bet</span>
             </div>
             <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
               <span>Duration</span>
               <span className="text-white/50 font-medium">Lifetime</span>
             </div>
             <div className="flex items-center justify-between py-1.5">
-              <span>Minimum payout</span>
-              <span className="text-white/50 font-medium font-mono">$1.00</span>
+              <span>Minimum claim</span>
+              <span className="text-white/50 font-medium font-mono">$0.01</span>
             </div>
           </div>
         </motion.div>
@@ -229,13 +357,13 @@ export default function ReferralsPage() {
         >
           <div className="px-5 py-3 border-b border-white/[0.04] flex items-center justify-between">
             <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Your Referrals</p>
-            <p className="text-[10px] text-white/20">{totalReferrals} total</p>
+            <p className="text-[10px] text-white/20">{stats.totalReferrals} total</p>
           </div>
 
-          {MOCK_REFERRALS.length > 0 ? (
+          {referrals.length > 0 ? (
             <div className="divide-y divide-white/[0.04]">
-              {MOCK_REFERRALS.map((ref) => (
-                <div key={ref.username} className="flex items-center gap-3 px-5 py-3">
+              {referrals.map((ref) => (
+                <div key={ref.id} className="flex items-center gap-3 px-5 py-3">
                   {/* Avatar */}
                   <div className="w-8 h-8 rounded-full bg-violet/10 border border-violet/20 flex items-center justify-center text-[10px] font-bold text-violet shrink-0">
                     {ref.username.slice(0, 2).toUpperCase()}
@@ -274,9 +402,9 @@ export default function ReferralsPage() {
               ))}
             </div>
           ) : (
-            <div className="px-5 py-12 text-center">
+            <div className="px-5 py-12 text-center space-y-1">
               <p className="text-white/20 text-sm">No referrals yet</p>
-              <p className="text-white/10 text-xs mt-1">Share your link to start earning</p>
+              <p className="text-white/10 text-xs">Share your link to start earning</p>
             </div>
           )}
         </motion.div>

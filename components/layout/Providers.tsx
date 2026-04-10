@@ -22,12 +22,27 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
 
     try {
       const token = await getAccessToken();
+
+      // Pull referral code from localStorage (set by /r/[code] landing page)
+      let referralCode: string | null = null;
+      try {
+        const stored = localStorage.getItem("throws_referral_code");
+        const expiresStr = localStorage.getItem("throws_referral_code_expires");
+        const expires = expiresStr ? parseInt(expiresStr, 10) : 0;
+        if (stored && expires > Date.now()) {
+          referralCode = stored;
+        }
+      } catch {
+        // ignore
+      }
+
       const res = await fetch("/api/auth/sync", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ referralCode }),
       });
 
       const data = await res.json();
@@ -39,7 +54,18 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           balance: data.user.balance,
           totalWagered: data.user.totalWagered,
           totalProfit: data.user.totalProfit,
+          referralCode: data.user.referralCode,
         });
+
+        // If user was created with this referral, clear the stored code
+        if (data.isNew && referralCode) {
+          try {
+            localStorage.removeItem("throws_referral_code");
+            localStorage.removeItem("throws_referral_code_expires");
+          } catch {
+            // ignore
+          }
+        }
       }
     } catch (err) {
       console.error("Auth sync failed:", err);

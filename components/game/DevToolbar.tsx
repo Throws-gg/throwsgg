@@ -20,10 +20,21 @@ export function DevToolbar() {
   const handleDevLogin = useCallback(async () => {
     setLoading(true);
     try {
+      // Pull referral code from localStorage if present
+      let referralCode: string | null = null;
+      try {
+        const stored = localStorage.getItem("throws_referral_code");
+        const expiresStr = localStorage.getItem("throws_referral_code_expires");
+        const expires = expiresStr ? parseInt(expiresStr, 10) : 0;
+        if (stored && expires > Date.now()) {
+          referralCode = stored;
+        }
+      } catch { /* ignore */ }
+
       const res = await fetch("/api/dev/user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: "testdegen" }),
+        body: JSON.stringify({ username: "testdegen", referralCode }),
       });
       const data = await res.json();
       if (data.user) {
@@ -34,7 +45,16 @@ export function DevToolbar() {
           balance: data.user.balance,
           totalWagered: data.user.totalWagered,
           totalProfit: data.user.totalProfit,
+          referralCode: data.user.referralCode,
         });
+
+        // Clear stored referral code after use
+        if (referralCode) {
+          try {
+            localStorage.removeItem("throws_referral_code");
+            localStorage.removeItem("throws_referral_code_expires");
+          } catch { /* ignore */ }
+        }
       }
     } catch (err) {
       console.error("Dev login failed:", err);

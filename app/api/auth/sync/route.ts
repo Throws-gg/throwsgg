@@ -29,6 +29,15 @@ export async function POST(request: NextRequest) {
 
   const privyId = verified.userId;
 
+  // Optional referral code passed from client (from localStorage)
+  let referralCode: string | null = null;
+  try {
+    const body = await request.json();
+    referralCode = body?.referralCode || null;
+  } catch {
+    // No body or invalid JSON — fine, just means no referral
+  }
+
   try {
     // Check if user exists
     const { data: existing } = await supabase
@@ -45,8 +54,33 @@ export async function POST(request: NextRequest) {
           balance: parseFloat(existing.balance),
           totalWagered: parseFloat(existing.total_wagered),
           totalProfit: parseFloat(existing.total_profit),
+          referralCode: existing.referral_code,
         },
       });
+    }
+
+    // Look up referrer if a code was provided
+    let referrerId: string | null = null;
+    if (referralCode) {
+      const normalizedCode = referralCode.trim().toUpperCase();
+      const { data: referrer } = await supabase
+        .from("users")
+        .select("id")
+        .eq("referral_code", normalizedCode)
+        .single();
+      if (referrer) {
+        referrerId = referrer.id;
+      }
+    }
+
+    // Generate a unique referral code for the new user
+    const { data: newCode, error: codeError } = await supabase.rpc("generate_referral_code");
+    if (codeError || !newCode) {
+      console.error("Failed to generate referral code:", codeError);
+      return NextResponse.json(
+        { error: "Failed to create account" },
+        { status: 500 }
+      );
     }
 
     // Create new user
@@ -61,6 +95,8 @@ export async function POST(request: NextRequest) {
         username,
         balance: 0,
         role: "player",
+        referral_code: newCode,
+        referrer_id: referrerId,
       })
       .select()
       .single();
@@ -80,6 +116,7 @@ export async function POST(request: NextRequest) {
         balance: parseFloat(newUser.balance),
         totalWagered: parseFloat(newUser.total_wagered),
         totalProfit: parseFloat(newUser.total_profit),
+        referralCode: newUser.referral_code,
       },
       isNew: true,
     });

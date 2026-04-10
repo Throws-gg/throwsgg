@@ -270,6 +270,10 @@ export async function runRace(raceId: string) {
   return result;
 }
 
+// Commission = 5% of house edge. Racing house edge = 3%.
+// So commission per stake = 0.03 * 0.05 = 0.0015 (0.15% of stake).
+const REFERRAL_COMMISSION_RATE = 0.0015;
+
 export async function settleRace(raceId: string) {
   // Get the winner
   const { data: winner } = await db()
@@ -299,6 +303,14 @@ export async function settleRace(raceId: string) {
 
   if (error) throw new Error(`Settlement failed: ${error.message}`);
 
+  // Credit referral rewards for every bet in this race
+  try {
+    await creditReferralRewards(raceId);
+  } catch (err) {
+    console.error("Failed to credit referral rewards:", err);
+    // Non-fatal — race still settles successfully
+  }
+
   // Update horse stats
   await updateHorseStats(raceId);
 
@@ -314,6 +326,42 @@ export async function settleRace(raceId: string) {
     await postRaceBigWins(raceId);
   } catch {
     // Non-fatal
+  }
+}
+
+/**
+ * Credit referral rewards for all bets in a settled race.
+ * For each bet placed by a referred user, credit their referrer
+ * 5% of the house edge (0.15% of stake).
+ */
+async function creditReferralRewards(raceId: string) {
+  // Get all bets from this race along with bettor's referrer info
+  const { data: bets } = await db()
+    .from("race_bets")
+    .select("id, user_id, amount, users!inner(referrer_id)")
+    .eq("race_id", raceId);
+
+  if (!bets || bets.length === 0) return;
+
+  for (const bet of bets) {
+    // Type narrowing for the joined users relation
+    const user = bet.users as unknown as { referrer_id: string | null };
+    const referrerId = user?.referrer_id;
+    if (!referrerId) continue;
+
+    const stake = parseFloat(String(bet.amount));
+    const commission = Math.round(stake * REFERRAL_COMMISSION_RATE * 1e8) / 1e8;
+
+    // Skip dust commissions (< 0.00000001)
+    if (commission <= 0) continue;
+
+    await db().rpc("credit_referral_reward", {
+      p_referrer_id: referrerId,
+      p_referred_id: bet.user_id,
+      p_race_bet_id: bet.id,
+      p_stake_amount: stake,
+      p_commission_amount: commission,
+    });
   }
 }
 

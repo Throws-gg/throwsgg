@@ -20,6 +20,7 @@ interface UserStore {
   balance: number;
   totalWagered: number;
   totalProfit: number;
+  referralCode: string | null;
 
   // Active bets for current round
   activeBets: ActiveBet[];
@@ -32,6 +33,7 @@ interface UserStore {
     balance: number;
     totalWagered: number;
     totalProfit: number;
+    referralCode?: string | null;
   }) => void;
   setBalance: (balance: number) => void;
   addActiveBet: (bet: ActiveBet) => void;
@@ -51,6 +53,7 @@ export const useUserStore = create<UserStore>((set) => ({
   balance: 0,
   totalWagered: 0,
   totalProfit: 0,
+  referralCode: null,
   activeBets: [],
 
   setUser: (user) =>
@@ -61,6 +64,7 @@ export const useUserStore = create<UserStore>((set) => ({
       balance: user.balance,
       totalWagered: user.totalWagered,
       totalProfit: user.totalProfit,
+      referralCode: user.referralCode ?? null,
     }),
 
   setBalance: (balance) => set({ balance }),
@@ -85,6 +89,7 @@ export const useUserStore = create<UserStore>((set) => ({
       balance: 0,
       totalWagered: 0,
       totalProfit: 0,
+      referralCode: null,
       activeBets: [],
     }),
 }));
