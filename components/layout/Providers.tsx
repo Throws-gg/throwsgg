@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/lib/auth/auth-context";
 import { useUserStore } from "@/stores/userStore";
 import { initPostHog, identify, resetAnalytics } from "@/lib/analytics/posthog";
+import { getVisitorId } from "@/lib/fingerprint/client";
 
 const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const isConfigured = privyAppId && privyAppId !== "your_privy_app_id";
@@ -37,13 +38,19 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
         // ignore
       }
 
+      // Get FingerprintJS visitor ID (null if env var not set)
+      const fingerprint = await getVisitorId();
+
+      // Extract the user's email from Privy if available
+      const email = user.email?.address || null;
+
       const res = await fetch("/api/auth/sync", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ referralCode }),
+        body: JSON.stringify({ referralCode, fingerprint, email }),
       });
 
       const data = await res.json();
@@ -53,6 +60,9 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           username: data.user.username,
           avatarUrl: null,
           balance: data.user.balance,
+          bonusBalance: data.user.bonusBalance ?? 0,
+          wageringRemaining: data.user.wageringRemaining ?? 0,
+          bonusExpiresAt: data.user.bonusExpiresAt ?? null,
           totalWagered: data.user.totalWagered,
           totalProfit: data.user.totalProfit,
           referralCode: data.user.referralCode,
@@ -69,6 +79,19 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           try {
             localStorage.removeItem("throws_referral_code");
             localStorage.removeItem("throws_referral_code_expires");
+          } catch {
+            // ignore
+          }
+        }
+
+        // Surface the signup bonus result via a localStorage flag so the UI
+        // can pop a congratulations modal on first page load after signup.
+        if (data.isNew && data.signupBonus?.granted) {
+          try {
+            localStorage.setItem(
+              "throws_signup_bonus_granted",
+              JSON.stringify(data.signupBonus)
+            );
           } catch {
             // ignore
           }

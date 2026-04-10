@@ -3,6 +3,7 @@ import { Outfit } from "next/font/google";
 import { Providers } from "@/components/layout/Providers";
 import { Navbar } from "@/components/layout/Navbar";
 import { MobileNav } from "@/components/layout/MobileNav";
+import { SignupBonusModal } from "@/components/bonus/SignupBonusModal";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -27,6 +28,7 @@ export default function RootLayout({
         <Providers>
           <Navbar />
           <main className="flex-1">{children}</main>
+          <SignupBonusModal />
         </Providers>
       </body>
     </html>

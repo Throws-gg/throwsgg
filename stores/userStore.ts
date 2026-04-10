@@ -17,7 +17,13 @@ interface UserStore {
   userId: string | null;
   username: string | null;
   avatarUrl: string | null;
-  balance: number;
+
+  // Money — split between cash (withdrawable) and bonus (locked until wagered)
+  balance: number;               // cash balance
+  bonusBalance: number;          // locked bonus funds
+  wageringRemaining: number;     // how much more to wager before bonus unlocks
+  bonusExpiresAt: string | null;
+
   totalWagered: number;
   totalProfit: number;
   referralCode: string | null;
@@ -31,11 +37,19 @@ interface UserStore {
     username: string;
     avatarUrl: string | null;
     balance: number;
+    bonusBalance?: number;
+    wageringRemaining?: number;
+    bonusExpiresAt?: string | null;
     totalWagered: number;
     totalProfit: number;
     referralCode?: string | null;
   }) => void;
   setBalance: (balance: number) => void;
+  setBonusState: (state: {
+    cashBalance?: number;
+    bonusBalance?: number;
+    wageringRemaining?: number;
+  }) => void;
   addActiveBet: (bet: ActiveBet) => void;
   clearActiveBets: () => void;
   updateBetStatus: (
@@ -51,6 +65,9 @@ export const useUserStore = create<UserStore>((set) => ({
   username: null,
   avatarUrl: null,
   balance: 0,
+  bonusBalance: 0,
+  wageringRemaining: 0,
+  bonusExpiresAt: null,
   totalWagered: 0,
   totalProfit: 0,
   referralCode: null,
@@ -62,12 +79,22 @@ export const useUserStore = create<UserStore>((set) => ({
       username: user.username,
       avatarUrl: user.avatarUrl,
       balance: user.balance,
+      bonusBalance: user.bonusBalance ?? 0,
+      wageringRemaining: user.wageringRemaining ?? 0,
+      bonusExpiresAt: user.bonusExpiresAt ?? null,
       totalWagered: user.totalWagered,
       totalProfit: user.totalProfit,
       referralCode: user.referralCode ?? null,
     }),
 
   setBalance: (balance) => set({ balance }),
+
+  setBonusState: (s) =>
+    set((state) => ({
+      balance: s.cashBalance ?? state.balance,
+      bonusBalance: s.bonusBalance ?? state.bonusBalance,
+      wageringRemaining: s.wageringRemaining ?? state.wageringRemaining,
+    })),
 
   addActiveBet: (bet) =>
     set((state) => ({ activeBets: [...state.activeBets, bet] })),
@@ -87,6 +114,9 @@ export const useUserStore = create<UserStore>((set) => ({
       username: null,
       avatarUrl: null,
       balance: 0,
+      bonusBalance: 0,
+      wageringRemaining: 0,
+      bonusExpiresAt: null,
       totalWagered: 0,
       totalProfit: 0,
       referralCode: null,

@@ -16,6 +16,7 @@ import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
 import { useSound } from "@/hooks/useSound";
+import { WageringProgress } from "@/components/bonus/WageringProgress";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { track } from "@/lib/analytics/posthog";
 
@@ -277,6 +278,9 @@ export default function RacingPage() {
           </span>
         </div>
       </div>
+
+      {/* Active signup bonus: wagering progress banner */}
+      <WageringProgress />
 
       {/* 2D Race Canvas — during closed phase (idle at gates) and racing */}
       {(phase === "closed" || isRacing) && (
@@ -601,7 +605,11 @@ function HorseBetCard({
           setResult({ success: false, message: data.error });
         }
       } else {
-        useUserStore.getState().setBalance(data.newBalance);
+        useUserStore.getState().setBonusState({
+          cashBalance: data.newBalance,
+          bonusBalance: data.bonusBalance,
+          wageringRemaining: data.wageringRemaining,
+        });
         onBetPlaced({
           id: data.bet.id,
           horseId: entry.horseId,

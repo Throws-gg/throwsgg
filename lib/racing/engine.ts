@@ -278,10 +278,12 @@ export async function runRace(raceId: string) {
   return result;
 }
 
-// Commission = 5% of house edge. At the current 1.156 overround the house
-// edge is ~13.49%, so commission per stake = HOUSE_EDGE * 0.05 ≈ 0.00674
-// (0.674% of stake). This stays in sync if OVERROUND changes in odds-engine.ts.
-const REFERRAL_COMMISSION_RATE = HOUSE_EDGE * 0.05;
+// Commission model lives entirely in the DB now (tier-based revshare).
+// See migration 014_affiliate_tiers.sql — accrue_referral_reward() RPC
+// looks up the referrer's current tier and applies the right rate.
+// We still import HOUSE_EDGE so it stays referenced if the commission
+// logic ever moves back to the application layer.
+void HOUSE_EDGE;
 
 export async function settleRace(raceId: string) {
   // Get the winner
@@ -339,39 +341,58 @@ export async function settleRace(raceId: string) {
 }
 
 /**
- * Credit referral rewards for all bets in a settled race.
- * For each bet placed by a referred user, credit their referrer
- * 5% of the house edge (~0.67% of stake at the current 1.156 overround).
+ * Accrue referral rewards for every settled bet in this race. Each reward
+ * is logged via the accrue_referral_reward RPC which:
+ *   - Uses the referrer's current affiliate tier (35/40/45% of NGR)
+ *   - Skips bets under $0.50 and non-positive NGR (wins)
+ *   - Sets status=pending if the referred user hasn't hit their 3x activation
+ *   - Sets status=held otherwise (ready for weekly rollup)
+ *
+ * Also calls check_referral_activation per user to flip the gate when they
+ * cross the 3x threshold, which releases their backlog of pending rewards.
  */
 async function creditReferralRewards(raceId: string) {
-  // Get all bets from this race along with bettor's referrer info
+  // Get all settled bets from this race with bettor's referrer info
   const { data: bets } = await db()
     .from("race_bets")
-    .select("id, user_id, amount, users!inner(referrer_id)")
-    .eq("race_id", raceId);
+    .select("id, user_id, amount, payout, status, users!inner(referrer_id)")
+    .eq("race_id", raceId)
+    .in("status", ["won", "lost"]);
 
   if (!bets || bets.length === 0) return;
 
+  // Track unique referred users so we only trigger activation once per user
+  const referredUserIds = new Set<string>();
+
   for (const bet of bets) {
-    // Type narrowing for the joined users relation
     const user = bet.users as unknown as { referrer_id: string | null };
     const referrerId = user?.referrer_id;
     if (!referrerId) continue;
 
+    referredUserIds.add(bet.user_id);
+
     const stake = parseFloat(String(bet.amount));
-    const commission = Math.round(stake * REFERRAL_COMMISSION_RATE * 1e8) / 1e8;
+    const payout = parseFloat(String(bet.payout || 0));
+    // NGR per bet = stake the house kept (losing bet) = stake - payout.
+    // Winning bets have NGR <= 0 and the RPC skips them.
+    const ngr = stake - payout;
 
-    // Skip dust commissions (< 0.00000001)
-    if (commission <= 0) continue;
-
-    await db().rpc("credit_referral_reward", {
+    await db().rpc("accrue_referral_reward", {
       p_referrer_id: referrerId,
       p_referred_id: bet.user_id,
       p_race_bet_id: bet.id,
-      p_stake_amount: stake,
-      p_commission_amount: commission,
+      p_stake: stake,
+      p_ngr: ngr,
     });
   }
+
+  // After accrual, check activation gate for each referred user
+  // (parallel — each RPC is self-contained)
+  await Promise.all(
+    Array.from(referredUserIds).map((uid) =>
+      db().rpc("check_referral_activation", { p_user_id: uid }).then(() => {})
+    )
+  );
 }
 
 async function updateHorseStats(raceId: string) {
