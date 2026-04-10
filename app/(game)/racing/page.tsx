@@ -16,6 +16,7 @@ import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
 import { useSound } from "@/hooks/useSound";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 
 // ======= TIMESTAMP-BASED COUNTDOWN (no jitter) =======
 
@@ -63,6 +64,7 @@ export default function RacingPage() {
   const { login } = useAuthActions();
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
   const { play, playWin } = useSound();
+  const authedFetch = useAuthedFetch();
 
   // Use ref so fetchState always sees latest bets without re-creating the callback
   const activeBetsRef = useRef(activeBets);
@@ -154,15 +156,14 @@ export default function RacingPage() {
               }
             }
 
-            // Refresh balance
+            // Refresh balance for the authenticated user
             if (userId) {
-              fetch("/api/dev/user", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: "testdegen" }),
-              }).then(r => r.json()).then(d => {
-                if (d.user) useUserStore.getState().setBalance(d.user.balance);
-              }).catch(() => {});
+              authedFetch("/api/user/me")
+                .then(r => r.json())
+                .then(d => {
+                  if (d.user) useUserStore.getState().setBalance(d.user.balance);
+                })
+                .catch(() => {});
             }
           }
         }
@@ -454,6 +455,7 @@ export default function RacingPage() {
             balance={balance}
             raceDistance={currentRace.distance}
             raceGround={currentRace.ground}
+            authedFetch={authedFetch}
             onClose={() => setSelectedHorse(null)}
             onBetPlaced={(bet) => setActiveBets(prev => [...prev, bet])}
           />
@@ -507,10 +509,12 @@ export default function RacingPage() {
 // ======= HORSE BET CARD (glassmorphic) =======
 
 function HorseBetCard({
-  entry, raceId, userId, balance, raceDistance, raceGround, onClose, onBetPlaced,
+  entry, raceId, userId, balance, raceDistance, raceGround, authedFetch, onClose, onBetPlaced,
 }: {
   entry: RaceEntry; raceId: string; userId: string | null; balance: number;
-  raceDistance: number; raceGround: string; onClose: () => void;
+  raceDistance: number; raceGround: string;
+  authedFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  onClose: () => void;
   onBetPlaced: (bet: { id: string; horseId: number; horseName: string; amount: number; lockedOdds: number; potentialPayout: number; status: string; betType: string }) => void;
 }) {
   const [betAmount, setBetAmount] = useState(0);
@@ -536,9 +540,8 @@ function HorseBetCard({
     if (!userId || betAmount < 0.1) return;
     setPlacing(true);
     try {
-      const res = await fetch("/api/race/bet", {
+      const res = await authedFetch("/api/race/bet", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, raceId, horseId: entry.horseId, amount: betAmount, betType }),
       });
       const data = await res.json();

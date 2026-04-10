@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BANKROLL_RACING } from "@/lib/racing/constants";
+import { verifyRequest } from "@/lib/auth/verify-request";
 
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
   try {
-    const { userId, raceId, horseId, amount, betType = "win" } = await request.json();
+    const body = await request.json();
+    const authed = await verifyRequest(request, body);
+    if (!authed) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!userId || !raceId || !horseId || !amount) {
+    // Always use the authenticated userId — ignore any client-provided value
+    const userId = authed.dbUserId;
+    const { raceId, horseId, amount, betType = "win" } = body;
+
+    if (!raceId || !horseId || !amount) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 

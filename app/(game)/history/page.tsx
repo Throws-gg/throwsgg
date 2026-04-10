@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { RaceWinCard } from "@/components/racing/RaceWinCard";
 import { useUserStore } from "@/stores/userStore";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import type { Horse } from "@/lib/racing/constants";
 
 // ======= TYPES =======
@@ -57,16 +58,17 @@ export default function HistoryPage() {
   const [shareWinBet, setShareWinBet] = useState<HistoryBet | null>(null);
   const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
+  const authedFetch = useAuthedFetch();
 
   const fetchHistory = useCallback(async () => {
     if (!userId) { setLoading(false); return; }
     try {
-      const res = await fetch(`/api/race/bet/history?userId=${userId}&limit=100`);
+      const res = await authedFetch(`/api/race/bet/history?userId=${userId}&limit=100`);
       const data = await res.json();
       if (data.bets) setBets(data.bets);
     } catch { /* silent */ }
     setLoading(false);
-  }, [userId]);
+  }, [userId, authedFetch]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 

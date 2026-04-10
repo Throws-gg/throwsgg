@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyRequest } from "@/lib/auth/verify-request";
 
 /**
- * GET /api/race/bet/history?userId=xxx&limit=50&offset=0
- * Returns the user's race bet history with horse and race data.
+ * GET /api/race/bet/history?limit=50&offset=0
+ * Returns the authenticated user's race bet history with horse and race data.
+ * Requires auth — userId is derived from the Privy token.
  */
 export async function GET(request: NextRequest) {
-  const supabase = createAdminClient();
   const { searchParams } = new URL(request.url);
 
-  const userId = searchParams.get("userId");
+  // Dev-mode fallback still supports userId query param via verifyRequest
+  const devUserId = searchParams.get("userId");
+  const authed = await verifyRequest(
+    request,
+    devUserId ? { userId: devUserId } : undefined
+  );
+  if (!authed) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = authed.dbUserId;
   const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
   const offset = parseInt(searchParams.get("offset") || "0");
 
-  if (!userId) {
-    return NextResponse.json({ error: "userId required" }, { status: 400 });
-  }
+  const supabase = createAdminClient();
 
   const { data, error } = await supabase
     .from("race_bets")
