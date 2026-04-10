@@ -147,8 +147,12 @@ export async function createNextRace() {
   }
 
   // Insert entries with gate positions and odds
+  // snapshot_form captures the horse's form at race-creation time so the
+  // provably-fair verification endpoint can replay the exact same inputs
+  // even after the horse's form has been mutated by subsequent races.
   const entries = selectedIds.map((horseId, i) => {
     const odds = oddsMap.get(horseId);
+    const snap = selectedHorses.find((h) => h.id === horseId);
     return {
       race_id: race.id,
       horse_id: horseId,
@@ -158,6 +162,7 @@ export async function createNextRace() {
       true_probability: odds?.probability || 0.125,
       place_odds: odds?.placeOdds || 2.5,
       show_odds: odds?.showOdds || 1.5,
+      snapshot_form: snap?.form ?? null,
     };
   });
 
@@ -186,11 +191,14 @@ export async function runRace(raceId: string) {
 
   const { data: entries } = await db()
     .from("race_entries")
-    .select("horse_id, horses(id, speed, stamina, form, consistency, ground_preference)")
+    .select("horse_id, snapshot_form, horses(id, speed, stamina, form, consistency, ground_preference)")
     .eq("race_id", raceId);
 
   if (!entries) throw new Error("No entries found");
 
+  // Use the form value snapshotted at race-creation time — NOT the horse's
+  // current form — so the simulation remains verifiable after subsequent
+  // races mutate the horse's form.
   const horses = entries.map((e) => {
     const h = e.horses as unknown as {
       id: number;
@@ -204,7 +212,7 @@ export async function runRace(raceId: string) {
       id: h.id,
       speed: h.speed,
       stamina: h.stamina,
-      form: h.form,
+      form: (e.snapshot_form as number | null) ?? h.form,
       consistency: h.consistency,
       groundPreference: h.ground_preference as GroundCondition,
     };

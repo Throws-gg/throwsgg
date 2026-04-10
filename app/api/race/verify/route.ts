@@ -41,11 +41,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Get entries with horse data for replay
+  // Get entries with horse data for replay.
+  // snapshot_form is the form value captured at race-creation time — use this
+  // (not the horse's current form) because subsequent races mutate the live
+  // value and would break verification for historical races.
   const { data: entries } = await supabase
     .from("race_entries")
     .select(
-      "horse_id, gate_position, finish_position, margin, horses(id, name, slug, color, speed, stamina, form, consistency, ground_preference)"
+      "horse_id, gate_position, finish_position, margin, snapshot_form, horses(id, name, slug, color, speed, stamina, form, consistency, ground_preference)"
     )
     .eq("race_id", race.id)
     .order("gate_position", { ascending: true });
@@ -62,6 +65,7 @@ export async function GET(request: NextRequest) {
       consistency: number;
       ground_preference: string;
     };
+    const snapshotForm = (e.snapshot_form as number | null) ?? h.form;
     return {
       horseId: e.horse_id,
       gatePosition: e.gate_position,
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
         color: h.color,
         speed: h.speed,
         stamina: h.stamina,
-        form: h.form,
+        form: snapshotForm,
         consistency: h.consistency,
         groundPreference: h.ground_preference,
       },
