@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateServerSeed, hashServerSeed } from "@/lib/game/provably-fair";
 import { simulateRace, selectRaceField } from "./simulation";
-import { calculateOddsMonteCarlo } from "./odds-engine";
+import { calculateOddsMonteCarlo, HOUSE_EDGE } from "./odds-engine";
 import { postRaceCommentary } from "./commentary";
 import { RACE_TIMING } from "./constants";
 import type { RaceStatus, GroundCondition, RaceDistance } from "./constants";
@@ -278,9 +278,10 @@ export async function runRace(raceId: string) {
   return result;
 }
 
-// Commission = 5% of house edge. Racing house edge = 3%.
-// So commission per stake = 0.03 * 0.05 = 0.0015 (0.15% of stake).
-const REFERRAL_COMMISSION_RATE = 0.0015;
+// Commission = 5% of house edge. Racing house edge ≈ 6.54% (from 1.07 overround).
+// So commission per stake = HOUSE_EDGE * 0.05 ≈ 0.00327 (0.327% of stake).
+// This stays in sync if OVERROUND changes in odds-engine.ts.
+const REFERRAL_COMMISSION_RATE = HOUSE_EDGE * 0.05;
 
 export async function settleRace(raceId: string) {
   // Get the winner
@@ -340,7 +341,7 @@ export async function settleRace(raceId: string) {
 /**
  * Credit referral rewards for all bets in a settled race.
  * For each bet placed by a referred user, credit their referrer
- * 5% of the house edge (0.15% of stake).
+ * 5% of the house edge (~0.33% of stake at the current 1.07 overround).
  */
 async function creditReferralRewards(raceId: string) {
   // Get all bets from this race along with bettor's referrer info

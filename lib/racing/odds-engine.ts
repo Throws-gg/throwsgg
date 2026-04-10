@@ -19,7 +19,9 @@ export interface FullOdds {
   showOdds: number;       // Decimal odds for show (top 3)
 }
 
-const OVERROUND = 1.07;  // 107% — ~6.5% house edge, competitive with real bookmakers
+export const OVERROUND = 1.07;  // 107% — ~6.5% house edge, competitive with real bookmakers
+// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.0654 (6.54%)
+export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
 const MIN_WIN_ODDS = 1.30;
 const MAX_WIN_ODDS = 40.00;
 const MIN_PLACE_ODDS = 1.10;
