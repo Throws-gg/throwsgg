@@ -5,6 +5,7 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/lib/auth/auth-context";
 import { useUserStore } from "@/stores/userStore";
+import { initPostHog, identify, resetAnalytics } from "@/lib/analytics/posthog";
 
 const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const isConfigured = privyAppId && privyAppId !== "your_privy_app_id";
@@ -57,6 +58,12 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           referralCode: data.user.referralCode,
         });
 
+        // Identify the user in analytics
+        identify(data.user.id, {
+          username: data.user.username,
+          total_wagered: data.user.totalWagered,
+        });
+
         // If user was created with this referral, clear the stored code
         if (data.isNew && referralCode) {
           try {
@@ -77,12 +84,14 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
       syncUser();
     } else if (ready && !authenticated) {
       clearUser();
+      resetAnalytics();
     }
   }, [ready, authenticated, user]);
 
   const handleLogout = useCallback(async () => {
     await privyLogout();
     clearUser();
+    resetAnalytics();
   }, [privyLogout, clearUser]);
 
   return (
@@ -140,6 +149,10 @@ function PrivyWrapper({ children }: { children: React.ReactNode }) {
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    initPostHog();
+  }, []);
+
   return (
     <PrivyWrapper>
       <TooltipProvider>{children}</TooltipProvider>

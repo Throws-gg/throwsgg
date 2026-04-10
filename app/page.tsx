@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import Image from "next/image";
 import { LiveWinsTicker } from "@/components/game/LiveWinsTicker";
+import { track } from "@/lib/analytics/posthog";
 
 // ======= ANIMATED COUNTER =======
 
@@ -168,16 +169,34 @@ export default function LandingPage() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || submitting) return;
     setSubmitting(true);
+    setError(null);
 
-    // TODO: Connect to email list (Loops, Resend, or Supabase table)
-    await new Promise(r => setTimeout(r, 800));
-
-    setSubmitted(true);
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, source: "landing" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong");
+        setSubmitting(false);
+        return;
+      }
+      setSubmitted(true);
+      track("waitlist_signup", {
+        source: "landing",
+        already_subscribed: !!data.alreadySubscribed,
+      });
+    } catch {
+      setError("Network error. Try again?");
+    }
     setSubmitting(false);
   };
 
@@ -230,7 +249,7 @@ export default function LandingPage() {
               >
                 <div className="inline-flex items-center gap-2 bg-green/[0.06] border border-green/20 rounded-full px-3.5 py-1">
                   <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
-                  <span className="text-[10px] text-green/80 font-semibold tracking-wide uppercase">Launching Soon</span>
+                  <span className="text-[10px] text-green/80 font-semibold tracking-wide uppercase">gates open soon</span>
                 </div>
               </motion.div>
 
@@ -259,8 +278,8 @@ export default function LandingPage() {
                 transition={{ duration: 0.6, delay: 0.3 }}
                 className="text-sm sm:text-base text-white/30 max-w-md mx-auto lg:mx-0 leading-relaxed"
               >
-                16 AI horses with unique stats, form, and personalities.
-                New race every 3 minutes. Fixed odds. Provably fair. Crypto-native.
+                16 AI horses. new race every 3 minutes. fixed odds, provably fair, no kyc.
+                built for degens who hate getting rugged.
               </motion.p>
 
               {/* CTA */}
@@ -290,17 +309,19 @@ export default function LandingPage() {
                                    shadow-[0_4px_25px_rgba(139,92,246,0.3),0_0_60px_rgba(139,92,246,0.1)]
                                    disabled:opacity-50"
                       >
-                        {submitting ? "..." : "Get early access"}
+                        {submitting ? "..." : "get me in"}
                       </button>
                     </div>
-                    <p className="text-[10px] text-white/15">
-                      Be first through the gates. No spam.
-                    </p>
+                    {error ? (
+                      <p className="text-[10px] text-red">{error}</p>
+                    ) : (
+                      <p className="text-[10px] text-white/15">first through the gates. zero spam, ever.</p>
+                    )}
                   </form>
                 ) : (
                   <div className="max-w-sm mx-auto lg:mx-0 rounded-xl border border-green/20 bg-green/[0.04] px-6 py-4 space-y-1">
-                    <p className="text-green text-sm font-bold">You&apos;re on the list</p>
-                    <p className="text-[11px] text-white/30">We&apos;ll notify you when the gates open.</p>
+                    <p className="text-green text-sm font-bold">you&apos;re in. gm.</p>
+                    <p className="text-[11px] text-white/30">we&apos;ll hit you the moment the gates crack open.</p>
                   </div>
                 )}
               </motion.div>
@@ -368,10 +389,10 @@ export default function LandingPage() {
         <div className="relative z-10 max-w-3xl mx-auto space-y-16">
           <div className="text-center space-y-3">
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              Dead simple.
+              dead simple.
             </h2>
             <p className="text-sm text-white/25 max-w-md mx-auto">
-              No accounts. No downloads. No waiting. Connect wallet, pick a horse, get paid.
+              no accounts. no downloads. no kyc. connect wallet, pick a horse, get paid.
             </p>
           </div>
 
@@ -379,20 +400,20 @@ export default function LandingPage() {
             {[
               {
                 step: "01",
-                title: "Study the form",
-                desc: "16 horses with real stats, career records, and evolving form. Every race changes the meta.",
+                title: "read the form",
+                desc: "16 horses. real stats, real form, real beef. every race shifts the meta.",
                 accent: "#8B5CF6",
               },
               {
                 step: "02",
-                title: "Place your bet",
-                desc: "Fixed odds locked at bet time. You see exactly what you'll win before the gates open.",
+                title: "send it",
+                desc: "fixed odds, locked the second you click. no parimutuel rug. what you see is what you get.",
                 accent: "#EC4899",
               },
               {
                 step: "03",
-                title: "Watch & collect",
-                desc: "Live 2D race in 20 seconds. Winners paid instantly. All outcomes provably fair.",
+                title: "watch. collect.",
+                desc: "20-second race. winners paid instantly. every outcome provably fair. verify the seed yourself.",
                 accent: "#06B6D4",
               },
             ].map((item) => (
@@ -422,10 +443,10 @@ export default function LandingPage() {
         <div className="relative z-10 max-w-4xl mx-auto space-y-12">
           <div className="text-center space-y-3">
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              Meet the field.
+              meet the field.
             </h2>
             <p className="text-sm text-white/25 max-w-md mx-auto">
-              Every horse has a personality, a track record, and an opinion about the ground. Learn them or lose money.
+              each one has a personality, a track record, and an opinion about the ground. learn them, or get cooked.
             </p>
           </div>
 
@@ -480,40 +501,40 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto space-y-16">
           <div className="text-center space-y-3">
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              Built different.
+              built different.
             </h2>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
             {[
               {
-                title: "Provably fair",
-                desc: "Every race uses HMAC-SHA256 with server/client seeds. Verify any result, anytime. We can't cheat even if we wanted to.",
+                title: "provably fair",
+                desc: "hmac-sha256 seed reveal on every race. verify any result, anytime. we literally can't cheat.",
                 icon: "shield",
               },
               {
-                title: "Fixed odds",
-                desc: "No parimutuel. Your odds lock at bet time. What you see is what you get. No last-second rug.",
+                title: "fixed odds",
+                desc: "no parimutuel. odds lock the moment you click. no last-second rug, no mystery payout.",
                 icon: "lock",
               },
               {
-                title: "Crypto-native",
-                desc: "USDC, SOL, ETH. Deposit in seconds, withdraw in seconds. No bank. No wait. No permission.",
+                title: "crypto-native",
+                desc: "usdc, sol, eth. deposit in seconds. withdraw in seconds. no bank, no wait, no permission slip.",
                 icon: "zap",
               },
               {
-                title: "No KYC",
-                desc: "Connect wallet. Bet. That's it. We don't need your passport to let you pick a horse.",
+                title: "no kyc",
+                desc: "connect wallet. bet. done. we don't need your passport to let you back a horse.",
                 icon: "user",
               },
               {
-                title: "Evolving meta",
-                desc: "Horse form changes after every race. Stats shift. Favourites fall. Longshots emerge. The meta is never solved.",
+                title: "the meta moves",
+                desc: "form shifts every race. favourites fall. longshots cook. the meta is never solved.",
                 icon: "trending",
               },
               {
                 title: "480 races a day",
-                desc: "New race every 3 minutes. 24/7. No off-season. No waiting. Always a race about to start.",
+                desc: "new race every 3 minutes. 24/7. no off-season, no downtime. there's always a race about to go.",
                 icon: "clock",
               },
             ].map((item) => (
@@ -539,15 +560,15 @@ export default function LandingPage() {
 
         <div className="relative z-10 max-w-lg mx-auto text-center space-y-8">
           <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-[1.05]">
-            The gates open soon.
+            the gates open soon.
             <br />
             <span className="bg-gradient-to-r from-violet via-magenta to-cyan bg-clip-text text-transparent">
-              Don&apos;t miss post time.
+              don&apos;t miss post time.
             </span>
           </h2>
 
           <p className="text-sm text-white/25">
-            Early access gets you first dibs on the starting line.
+            early access = front of the grid when the gates crack. don&apos;t get left behind.
           </p>
 
           {!submitted ? (
@@ -571,13 +592,13 @@ export default function LandingPage() {
                              shadow-[0_4px_25px_rgba(139,92,246,0.3),0_0_60px_rgba(139,92,246,0.1)]
                              disabled:opacity-50"
                 >
-                  {submitting ? "..." : "Get early access"}
+                  {submitting ? "..." : "get me in"}
                 </button>
               </div>
             </form>
           ) : (
             <div className="max-w-sm mx-auto rounded-xl border border-green/20 bg-green/[0.04] px-6 py-4">
-              <p className="text-green text-sm font-bold">You&apos;re locked in.</p>
+              <p className="text-green text-sm font-bold">locked in. see you at post time.</p>
             </div>
           )}
 

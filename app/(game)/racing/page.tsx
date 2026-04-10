@@ -17,6 +17,7 @@ import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
 import { useSound } from "@/hooks/useSound";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
+import { track } from "@/lib/analytics/posthog";
 
 // ======= TIMESTAMP-BASED COUNTDOWN (no jitter) =======
 
@@ -131,8 +132,19 @@ export default function RacingPage() {
             // Sound effects
             if (totalWinPayout > 0) {
               playWin(totalWinPayout);
+              track("bet_won", {
+                race_number: state.currentRace.raceNumber,
+                total_payout: totalWinPayout,
+                winning_bets: wonBets.length,
+                top_odds: topWinBet?.lockedOdds,
+              });
             } else {
               play("loss");
+              track("bet_lost", {
+                race_number: state.currentRace.raceNumber,
+                lost_bets: currentBets.length,
+                total_staked: currentBets.reduce((s, b) => s + b.amount, 0),
+              });
             }
 
             // Big win celebration
@@ -194,6 +206,25 @@ export default function RacingPage() {
   const handleChatSend = useCallback((message: string) => {
     if (userId && username) sendMessage(userId, username, message);
   }, [userId, username, sendMessage]);
+
+  const handleCancelBet = useCallback(async (betId: string) => {
+    if (!userId) return;
+    try {
+      const res = await authedFetch("/api/race/bet/cancel", {
+        method: "POST",
+        body: JSON.stringify({ userId, betId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.cancelled) {
+        // Remove from active bets and refund balance locally
+        setActiveBets(prev => prev.filter(b => b.id !== betId));
+        if (typeof data.newBalance === "number") {
+          useUserStore.getState().setBalance(data.newBalance);
+        }
+        track("bet_cancelled", { bet_id: betId, refunded: data.refunded });
+      }
+    } catch { /* silent — next poll will reconcile */ }
+  }, [userId, authedFetch]);
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><p className="text-muted-foreground">Loading races...</p></div>;
   if (!raceState) return <div className="flex items-center justify-center min-h-[50vh]"><p className="text-muted-foreground">Creating first race...</p></div>;
@@ -381,9 +412,19 @@ export default function RacingPage() {
               </div>
               <div className="text-right">
                 {bet.status === "pending" && (
-                  <div>
-                    <span className="text-xs font-mono text-white/50">${bet.amount.toFixed(2)}</span>
-                    <span className="text-[9px] text-white/25 block">→ ${bet.potentialPayout.toFixed(2)}</span>
+                  <div className="flex items-center gap-2">
+                    <div>
+                      <span className="text-xs font-mono text-white/50">${bet.amount.toFixed(2)}</span>
+                      <span className="text-[9px] text-white/25 block">→ ${bet.potentialPayout.toFixed(2)}</span>
+                    </div>
+                    {isBetting && (
+                      <button
+                        onClick={() => handleCancelBet(bet.id)}
+                        className="px-2 py-1 rounded border border-red/20 text-red/60 hover:bg-red/10 hover:text-red/80 active:scale-95 transition-all text-[9px] font-bold uppercase"
+                      >
+                        cancel
+                      </button>
+                    )}
                   </div>
                 )}
                 {bet.status === "won" && (
@@ -570,6 +611,14 @@ function HorseBetCard({
           potentialPayout: data.bet.potentialPayout,
           status: "pending",
           betType: data.bet.betType || betType,
+        });
+        track("bet_placed", {
+          horse_name: entry.horse.name,
+          horse_id: entry.horseId,
+          bet_type: betType,
+          amount: data.bet.amount,
+          locked_odds: data.bet.lockedOdds,
+          potential_payout: data.bet.potentialPayout,
         });
         setResult({ success: true, message: `Bet placed! Potential win: $${potentialPayout.toFixed(2)}` });
         setTimeout(() => { onClose(); setResult(null); }, 1500);
