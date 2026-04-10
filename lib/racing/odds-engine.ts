@@ -19,8 +19,10 @@ export interface FullOdds {
   showOdds: number;       // Decimal odds for show (top 3)
 }
 
-export const OVERROUND = 1.07;  // 107% — ~6.5% house edge, competitive with real bookmakers
-// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.0654 (6.54%)
+export const OVERROUND = 1.156;  // 115.6% — ~13.5% house edge, early-stage safety margin
+// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.1349 (13.49%)
+// Target range: 12-15% while we're building up the bankroll. Real bookmakers
+// typically sit at 10-15% so this is firmly in range.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
 const MIN_WIN_ODDS = 1.30;
 const MAX_WIN_ODDS = 40.00;
