@@ -20,7 +20,7 @@ export async function logAdminAction(params: {
   try {
     const supabase = createAdminClient();
     const { error } = await supabase.from("admin_actions").insert({
-      admin_id: params.admin.dbUserId,
+      admin_identifier: params.admin.dbUserId,
       admin_username: params.admin.username,
       action_type: params.actionType,
       target_type: params.targetType || null,

@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { useUserStore } from "@/stores/userStore";
 import { cn } from "@/lib/utils";
 
 // ============================================
@@ -12,6 +10,10 @@ import { cn } from "@/lib/utils";
 //
 // Dark operational dashboard. Sharp corners on data surfaces.
 // Monospace typography for numbers. Status LEDs for live data.
+//
+// Auth: handled entirely by middleware.ts — if you can see this layout,
+// you're already authenticated via the password session cookie.
+// The /admin/login page renders without the chrome.
 // ============================================
 
 const NAV_ITEMS = [
@@ -28,70 +30,22 @@ const NAV_ITEMS = [
 ] as const;
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const userId = useUserStore((s) => s.userId);
-  const [status, setStatus] = useState<"checking" | "ok" | "denied">("checking");
-  const [adminName, setAdminName] = useState<string>("");
+  const router = useRouter();
 
-  useEffect(() => {
-    let cancelled = false;
+  // Login page renders standalone — no admin chrome
+  if (pathname === "/admin/login") {
+    return <>{children}</>;
+  }
 
-    async function check() {
-      try {
-        const url = userId ? `/api/admin/check?userId=${userId}` : "/api/admin/check";
-        const res = await fetch(url);
-        if (cancelled) return;
-        if (res.ok) {
-          const data = await res.json();
-          setAdminName(data.username || "");
-          setStatus("ok");
-        } else {
-          setStatus("denied");
-          setTimeout(() => router.push("/"), 1500);
-        }
-      } catch {
-        if (cancelled) return;
-        setStatus("denied");
-        setTimeout(() => router.push("/"), 1500);
-      }
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+    } catch {
+      // Ignore
     }
-    check();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, router]);
-
-  if (status === "checking") {
-    return (
-      <div className="min-h-screen bg-[#05050a] flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2">
-            <span className="w-2 h-2 bg-violet rounded-full animate-pulse" />
-            <span className="w-2 h-2 bg-violet/60 rounded-full animate-pulse" style={{ animationDelay: "0.1s" }} />
-            <span className="w-2 h-2 bg-violet/30 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }} />
-          </div>
-          <p className="text-[11px] text-white/30 uppercase tracking-[0.3em] font-mono">verifying access</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "denied") {
-    return (
-      <div className="min-h-screen bg-[#05050a] flex items-center justify-center px-4">
-        <div className="max-w-md w-full rounded-lg border border-red/20 bg-red/[0.03] p-8 text-center space-y-3">
-          <div className="inline-flex items-center gap-2 bg-red/10 border border-red/30 rounded px-3 py-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-red animate-pulse" />
-            <span className="text-[10px] text-red font-bold tracking-widest uppercase font-mono">access denied</span>
-          </div>
-          <h1 className="text-2xl font-black text-white">not an admin.</h1>
-          <p className="text-sm text-white/40">redirecting...</p>
-        </div>
-      </div>
-    );
-  }
+    router.push("/admin/login");
+  };
 
   return (
     <div className="min-h-screen bg-[#05050a] text-white">
@@ -128,11 +82,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px] font-mono">
-            <div className="hidden sm:flex items-center gap-1.5 text-white/35">
-              <span className="uppercase tracking-widest">op</span>
-              <span className="text-white/70 font-bold">@{adminName || "admin"}</span>
-            </div>
+          <div className="flex items-center gap-2 text-[11px] font-mono">
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded border border-white/10 hover:border-red/40 hover:bg-red/[0.05] hover:text-red transition-all uppercase tracking-wider text-white/50"
+            >
+              logout
+            </button>
             <Link
               href="/"
               className="px-3 py-1.5 rounded border border-white/10 hover:border-white/25 hover:bg-white/[0.03] transition-all uppercase tracking-wider text-white/50 hover:text-white"

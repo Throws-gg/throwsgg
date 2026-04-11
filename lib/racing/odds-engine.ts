@@ -24,12 +24,17 @@ export const OVERROUND = 1.156;  // 115.6% — ~13.5% house edge, early-stage sa
 // Target range: 12-15% while we're building up the bankroll. Real bookmakers
 // typically sit at 10-15% so this is firmly in range.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
+// Odds caps — kept wide so the book percentage lands near OVERROUND.
+// Earlier 40x cap on win odds created a structural dead zone at the longshot
+// end: true 1% horses were priced at 40x and the overall book drifted above
+// the configured overround. 100x lets genuine bombs price honestly.
+// Liability is capped separately via BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO.
 const MIN_WIN_ODDS = 1.30;
-const MAX_WIN_ODDS = 40.00;
+const MAX_WIN_ODDS = 100.00;
 const MIN_PLACE_ODDS = 1.10;
-const MAX_PLACE_ODDS = 15.00;
+const MAX_PLACE_ODDS = 25.00;
 const MIN_SHOW_ODDS = 1.05;
-const MAX_SHOW_ODDS = 6.00;
+const MAX_SHOW_ODDS = 12.00;
 
 /**
  * Monte Carlo odds — runs the simulation 1500 times to estimate
@@ -41,7 +46,7 @@ export function calculateOddsMonteCarlo(
   distance: RaceDistance,
   ground: GroundCondition,
   baseSeed: string = "odds-calc",
-  iterations: number = 1500
+  iterations: number = 4000
 ): Map<number, FullOdds> {
   const winCounts = new Map<number, number>();
   const placeCounts = new Map<number, number>();  // Top 2
@@ -77,9 +82,13 @@ export function calculateOddsMonteCarlo(
   const result = new Map<number, FullOdds>();
 
   for (const h of horses) {
-    const winProb = Math.max((winCounts.get(h.id) || 0) / iterations, 0.005);
-    const placeProb = Math.max((placeCounts.get(h.id) || 0) / iterations, 0.01);
-    const showProb = Math.max((showCounts.get(h.id) || 0) / iterations, 0.02);
+    // Floors must match the cap ceilings — a 100x win cap needs floor >=
+    // 1/(100*OVERROUND) = 0.00865, otherwise the Monte Carlo slams horses
+    // into the floor, prices them at 100x, and they never win. Use 0.01
+    // (=1% true prob → prices near the 100x cap with room to spare).
+    const winProb = Math.max((winCounts.get(h.id) || 0) / iterations, 0.01);
+    const placeProb = Math.max((placeCounts.get(h.id) || 0) / iterations, 0.035);
+    const showProb = Math.max((showCounts.get(h.id) || 0) / iterations, 0.075);
 
     // Apply overround to each
     let winOdds = 1 / (winProb * OVERROUND);

@@ -1,40 +1,36 @@
 import { NextRequest } from "next/server";
-import { verifyRequest } from "./verify-request";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { ADMIN_COOKIE_NAME, verifySessionToken } from "./admin-password";
 
 export interface AuthedAdmin {
-  privyId: string;
-  dbUserId: string;
   username: string;
+  dbUserId: string;
+  privyId: string;
   role: "admin";
 }
 
 /**
- * Verify the request and require admin role.
+ * Verify an admin request.
  *
- * Returns the authed admin user, or null if the user is not an admin
- * (or not authed at all). API routes should respond with 401/403 on null.
+ * Admin auth is now password-based — the middleware already blocks
+ * unauthenticated requests at /admin/* and /api/admin/*. This helper
+ * provides defense-in-depth: it re-verifies the session cookie and
+ * returns a stub "admin" user object for audit logging.
+ *
+ * The `_body` parameter is kept for backwards compatibility with routes
+ * that pass it through from the old role-based check, but no longer does
+ * anything.
  */
 export async function verifyAdmin(
   request: NextRequest,
-  body?: Record<string, unknown>
+  _body?: Record<string, unknown>
 ): Promise<AuthedAdmin | null> {
-  const authed = await verifyRequest(request, body);
-  if (!authed) return null;
-
-  const supabase = createAdminClient();
-  const { data: user } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", authed.dbUserId)
-    .single();
-
-  if (!user || user.role !== "admin") return null;
+  const cookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
+  if (!(await verifySessionToken(cookie))) return null;
 
   return {
-    privyId: authed.privyId,
-    dbUserId: authed.dbUserId,
-    username: authed.username,
+    username: "admin",
+    dbUserId: "00000000-0000-0000-0000-000000000000",
+    privyId: "admin",
     role: "admin",
   };
 }

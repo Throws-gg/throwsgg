@@ -24,9 +24,7 @@ export const BANKROLL_RACING = {
   MAX_BET: 100,                    // Hard cap $100 per bet
   MAX_BET_RATIO: 0.01,            // 1% of bankroll
   MAX_RACE_LIABILITY_RATIO: 0.03, // 3% of bankroll per race
-  MIN_ODDS: 1.20,
-  MAX_ODDS: 50.00,
-  // Source of truth for overround lives in lib/racing/odds-engine.ts (OVERROUND)
+  // Odds caps + overround source of truth live in lib/racing/odds-engine.ts
 } as const;
 
 export type RacePhase = "betting" | "closed" | "racing" | "results";
