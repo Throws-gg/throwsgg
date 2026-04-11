@@ -582,9 +582,16 @@ export async function tick() {
 
 async function tickInner() {
   const now = Date.now();
+
+  // Admin pause check — only blocks new race creation, never blocks settling in-progress races
+  const paused = await isRacesPaused();
+
   let race = await getCurrentRace();
 
   if (!race) {
+    if (paused) {
+      return { action: "paused", status: "races_paused" };
+    }
     race = await createNextRace();
     return { action: "created", raceId: race.id, status: "betting" };
   }
@@ -612,9 +619,25 @@ async function tickInner() {
   }
 
   if (status === "settled" && now >= resultsEndAt) {
+    if (paused) {
+      return { action: "paused", raceId: race.id, status: "races_paused" };
+    }
     const newRace = await createNextRace();
     return { action: "new_race", raceId: newRace.id, status: "betting" };
   }
 
   return { action: "waiting", raceId: race.id, status };
+}
+
+async function isRacesPaused(): Promise<boolean> {
+  try {
+    const { data } = await db()
+      .from("system_flags")
+      .select("value")
+      .eq("key", "races_paused")
+      .maybeSingle();
+    return data?.value === true;
+  } catch {
+    return false;
+  }
 }

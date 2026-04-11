@@ -242,7 +242,7 @@ export default function RacingPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-    <div className="flex-1 max-w-2xl mx-auto px-4 py-3 space-y-3 overflow-x-hidden w-full">
+    <div className="flex-1 max-w-2xl xl:max-w-[1400px] mx-auto px-4 xl:px-6 py-3 xl:py-4 space-y-3 xl:space-y-4 overflow-x-hidden w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -531,9 +531,11 @@ export default function RacingPage() {
       />
     </div>
 
-    {/* Chat sidebar — desktop only */}
-    <aside className="hidden lg:flex w-[300px] border-l border-border flex-col bg-card shrink-0">
-      <div className="p-3 border-b border-border flex items-center justify-between">
+    {/* Chat sidebar — desktop only.
+        Pinned to viewport height so it stays fixed regardless of how
+        tall the center column grows during betting/results phases. */}
+    <aside className="hidden lg:flex w-[300px] border-l border-border flex-col bg-card shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] self-start">
+      <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
         <span className="text-sm font-bold">chat</span>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />

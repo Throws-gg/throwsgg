@@ -33,6 +33,15 @@ function getSpritePaths(identity: HorseIdentity) {
   return { body, hair, face };
 }
 
+// Convert #RRGGBB → "r, g, b" for rgba() construction
+function hexToRgbTuple(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
 export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDuration, ground }: RaceCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -60,8 +69,31 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
     function resize() {
       const container = containerRef.current;
       const w = container ? container.clientWidth : Math.min(900, window.innerWidth - 32);
-      const isMobile = w < 500;
-      setCanvasSize({ w, h: isMobile ? Math.round(w * 1.0) : Math.round(w * 0.55) });
+
+      // Three tiers — mobile behaviour is frozen, desktop fills the
+      // available viewport so the whole race fits without scrolling.
+      let h: number;
+      if (w < 500) {
+        // Mobile — unchanged. Majority of users live here.
+        h = Math.round(w * 1.0);
+      } else if (w < 1100) {
+        // Tablet / narrow desktop.
+        h = Math.round(w * 0.62);
+      } else {
+        // Desktop streamer mode — height is derived from the actual
+        // viewport so the canvas always fits. Chrome budget below is the
+        // sum of navbar + racing-page header + wagering banner + page
+        // padding + gutters, measured at ~260px with padding to spare.
+        const CHROME_BUDGET = 260;
+        const viewportMax = Math.max(540, window.innerHeight - CHROME_BUDGET);
+        // Aspect-driven "ideal" height — still capped by viewport so we
+        // never force a scroll. Using a tighter 0.58 ratio because the
+        // center column is now 1400px max instead of 1800px.
+        const aspectH = Math.round(w * 0.58);
+        h = Math.min(aspectH, viewportMax);
+      }
+
+      setCanvasSize({ w, h });
     }
     resize();
     window.addEventListener("resize", resize);
@@ -99,8 +131,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
 
     const isRacing = phase === "racing" || phase === "results";
     const isClosed = phase === "closed";
-    const isActive = isRacing; // for scrolling/dust purposes
-    const isTurf = ground !== "firm";
+    const isActive = isRacing;
 
     if (!isRacing && !isClosed) {
       smoothScrollRef.current = 0;
@@ -111,18 +142,28 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
       smoothScrollRef.current = 0;
     }
 
-    const skyH = H * 0.3;
-    const trackTop = skyH + H * 0.05;
-    const trackH = H * 0.6;
+    // ===== TRACK LAYOUT =====
+    // Editorial-quiet: no sky, no hills, no grandstand. The whole canvas is
+    // the track area with lanes filling the vertical space, leaving thin
+    // margins top/bottom for HUD breathing room.
+    const trackTop = H * 0.08;
+    const trackH = H * 0.84;
     const laneH = trackH / 8;
 
     // Sprite render scale — fit sprite into lane height with some padding
     const spriteScale = (laneH * 0.95) / SPRITE.FRAME_H;
 
+    // UI scale — everything chrome-related (badges, panels, text) scales
+    // against an 800px baseline. Clamped so it never shrinks on narrow
+    // viewports and never gets absurdly large on ultra-wide monitors.
+    // 800px → 1.0, 1400px → 1.75, 2000px → 2.5, capped at 3.0.
+    const UI_SCALE = Math.max(0.9, Math.min(3.0, W / 800));
+
     function draw() {
       if (!ctx) return;
       const fc = ++frameRef.current;
 
+      // Smooth per-horse position
       for (const e of entries) {
         const target = getTargetProgress(e.horseId);
         const current = smoothPosRef.current.get(e.horseId) ?? target;
@@ -130,26 +171,62 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         smoothPosRef.current.set(e.horseId, lerped);
       }
 
+      // Clear
       ctx.clearRect(0, 0, W, H);
 
-      // ===== SKY =====
-      const sky = ctx.createLinearGradient(0, 0, 0, skyH);
-      sky.addColorStop(0, "#0f1520");
-      sky.addColorStop(1, "#1a2030");
-      ctx.fillStyle = sky;
-      ctx.fillRect(0, 0, W, skyH + 20);
+      // ===== BACKGROUND: editorial-quiet base =====
+      // Base fill
+      ctx.fillStyle = "#08080D";
+      ctx.fillRect(0, 0, W, H);
 
-      // Stars
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      for (let i = 0; i < 30; i++) {
-        const sx = (i * 97 + 13) % W;
-        const sy = (i * 43 + 7) % (skyH - 10);
-        ctx.beginPath();
-        ctx.arc(sx, sy, i % 3 === 0 ? 1.2 : 0.6, 0, Math.PI * 2);
-        ctx.fill();
+      // Ambient violet glow top-left (radial)
+      const vioGlow = ctx.createRadialGradient(
+        W * 0.2, H * 0.15, 0,
+        W * 0.2, H * 0.15, Math.max(W, H) * 0.55
+      );
+      vioGlow.addColorStop(0, "rgba(139, 92, 246, 0.18)");
+      vioGlow.addColorStop(1, "rgba(139, 92, 246, 0)");
+      ctx.fillStyle = vioGlow;
+      ctx.fillRect(0, 0, W, H);
+
+      // Ambient cyan glow bottom-right (radial)
+      const cyGlow = ctx.createRadialGradient(
+        W * 0.85, H * 0.9, 0,
+        W * 0.85, H * 0.9, Math.max(W, H) * 0.5
+      );
+      cyGlow.addColorStop(0, "rgba(6, 182, 212, 0.14)");
+      cyGlow.addColorStop(1, "rgba(6, 182, 212, 0)");
+      ctx.fillStyle = cyGlow;
+      ctx.fillRect(0, 0, W, H);
+
+      // Hairline grid — 120px cells, 4% white
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+      ctx.lineWidth = 1;
+      const gridStep = 120;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += gridStep) {
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, H);
       }
+      for (let y = 0; y <= H; y += gridStep) {
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(W, y + 0.5);
+      }
+      ctx.stroke();
 
-      // Scroll
+      // Vignette — radial darkening pushing focus inward
+      const vignette = ctx.createRadialGradient(
+        W / 2, H / 2, 0,
+        W / 2, H / 2, Math.max(W, H) * 0.7
+      );
+      vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+      vignette.addColorStop(0.5, "rgba(0, 0, 0, 0)");
+      vignette.addColorStop(1, "rgba(0, 0, 0, 0.55)");
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, W, H);
+
+      // ===== SCROLL CAMERA =====
+      // Keep the existing scroll logic so overtaking/camera feel is preserved
       const maxProg = Math.max(...entries.map(e => smoothPosRef.current.get(e.horseId) ?? 3));
       const targetScroll = isActive ? Math.max(0, (maxProg / 100) * W * 1.2 - W * 0.5) : 0;
       smoothScrollRef.current = Math.max(
@@ -158,119 +235,64 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
       );
       const scrollX = smoothScrollRef.current;
 
-      // ===== DISTANT HILLS =====
-      ctx.fillStyle = "#141f14";
+      // ===== TRACK BAND =====
+      // Subtle horizontal band spanning all 8 lanes. No sky, no ground.
+      // Thin top/bottom hairlines frame it. No track color gradient — the
+      // dust trails and horses carry the color.
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 1;
+      // Top rail
       ctx.beginPath();
-      ctx.moveTo(0, skyH);
-      for (let x = 0; x <= W; x += 3) {
-        const hx = x + scrollX * 0.06;
-        ctx.lineTo(x, skyH - 8 + Math.sin(hx * 0.006) * 10 + Math.sin(hx * 0.015) * 4);
-      }
-      ctx.lineTo(W, skyH + 15);
-      ctx.lineTo(0, skyH + 15);
-      ctx.fill();
+      ctx.moveTo(0, trackTop + 0.5);
+      ctx.lineTo(W, trackTop + 0.5);
+      ctx.stroke();
+      // Bottom rail
+      ctx.beginPath();
+      ctx.moveTo(0, trackTop + trackH + 0.5);
+      ctx.lineTo(W, trackTop + trackH + 0.5);
+      ctx.stroke();
 
-      // ===== TREES =====
-      for (let i = 0; i < 18; i++) {
-        const tx = ((i * 110 + 40) - scrollX * 0.12) % (W + 200) - 60;
-        const ty = skyH + 2 + (i % 3) * 4;
-        ctx.fillStyle = "#2a1a0a";
-        ctx.fillRect(tx - 1.5, ty, 3, 10);
-        ctx.fillStyle = i % 2 ? "#1a3a1a" : "#224422";
-        ctx.beginPath();
-        ctx.ellipse(tx, ty - 1, 8 + (i % 4) * 2, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // ===== GRANDSTAND =====
-      const gsX = W * 0.65 - scrollX * 0.15;
-      if (gsX > -180 && gsX < W + 30) {
-        ctx.fillStyle = "#22222e";
-        ctx.fillRect(gsX, skyH - 2, 130, 22);
-        ctx.fillStyle = "#1a1a24";
-        ctx.beginPath();
-        ctx.moveTo(gsX - 3, skyH - 2);
-        ctx.lineTo(gsX + 65, skyH - 12);
-        ctx.lineTo(gsX + 133, skyH - 2);
-        ctx.fill();
-        ctx.strokeStyle = "#c0963060";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(gsX - 3, skyH - 2);
-        ctx.lineTo(gsX + 65, skyH - 12);
-        ctx.lineTo(gsX + 133, skyH - 2);
-        ctx.stroke();
-        if (isActive) {
-          const cols = ["#e63946", "#457b9d", "#f0c040", "#2d6a4f", "#e9c46a", "#fff"];
-          for (let s = 0; s < 24; s++) {
-            ctx.fillStyle = cols[s % cols.length] + "90";
-            ctx.beginPath();
-            ctx.arc(
-              gsX + 6 + (s % 12) * 10,
-              skyH + 3 + Math.floor(s / 12) * 8 + Math.sin(fc * 0.12 + s * 0.8) * 1.5,
-              1.8, 0, Math.PI * 2
-            );
-            ctx.fill();
-          }
-        }
-      }
-
-      // ===== TRACK =====
-      const trackGrad = ctx.createLinearGradient(0, trackTop, 0, trackTop + trackH);
-      if (isTurf) {
-        trackGrad.addColorStop(0, "#2a5428");
-        trackGrad.addColorStop(0.5, "#305830");
-        trackGrad.addColorStop(1, "#284e26");
-      } else {
-        trackGrad.addColorStop(0, "#5a4a38");
-        trackGrad.addColorStop(1, "#4a3a28");
-      }
-      ctx.fillStyle = trackGrad;
-      ctx.fillRect(0, trackTop, W, trackH);
-
-      // Mow stripes
-      for (let s = 0; s < 30; s++) {
-        const sx = ((s * 45) - scrollX) % (W + 100) - 50;
-        ctx.fillStyle = s % 2 ? "rgba(255,255,255,0.015)" : "rgba(0,0,0,0.015)";
-        ctx.fillRect(sx, trackTop, 22, trackH);
-      }
-
-      // Lane lines
-      ctx.strokeStyle = "rgba(255,255,255,0.04)";
-      ctx.lineWidth = 0.5;
+      // Lane dividers — dashed hairlines (matches teaser)
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 8]);
       for (let l = 1; l < 8; l++) {
         ctx.beginPath();
-        ctx.moveTo(0, trackTop + l * laneH);
-        ctx.lineTo(W, trackTop + l * laneH);
+        ctx.moveTo(0, trackTop + l * laneH + 0.5);
+        ctx.lineTo(W, trackTop + l * laneH + 0.5);
         ctx.stroke();
       }
+      ctx.restore();
 
-      // Rails
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, trackTop); ctx.lineTo(W, trackTop); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, trackTop + trackH); ctx.lineTo(W, trackTop + trackH); ctx.stroke();
-
-      // Rail posts
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 1.5;
-      for (let fp = 0; fp < W / 35 + 2; fp++) {
-        const fpx = ((fp * 35) - scrollX) % (W + 70) - 35;
-        ctx.beginPath(); ctx.moveTo(fpx, trackTop - 5); ctx.lineTo(fpx, trackTop + 5); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(fpx, trackTop + trackH - 5); ctx.lineTo(fpx, trackTop + trackH + 5); ctx.stroke();
-      }
-
-      // Finish line
+      // ===== FINISH LINE =====
+      // Dashed vertical white hairline with subtle glow (teaser style).
+      // Same position math as before so it lands where the engine expects.
       const finishX = (100 / 100) * W * 1.2 - scrollX + 20;
       if (finishX > -15 && finishX < W + 15) {
-        const sq = 5;
-        const rows = Math.floor(trackH / sq);
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < 2; c++) {
-            ctx.fillStyle = ((r + c) % 2 === 0) ? "#fff" : "#000";
-            ctx.fillRect(finishX + c * sq, trackTop + r * sq, sq, sq);
-          }
-        }
+        ctx.save();
+        ctx.shadowColor = "rgba(255, 255, 255, 0.3)";
+        ctx.shadowBlur = 18;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([12, 12]);
+        ctx.beginPath();
+        ctx.moveTo(finishX + 0.5, trackTop - 8);
+        ctx.lineTo(finishX + 0.5, trackTop + trackH + 8);
+        ctx.stroke();
+        ctx.restore();
+
+        // Faint low-alpha trailing line (the "glow" beyond the hairline)
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(finishX - 2.5, trackTop - 8);
+        ctx.lineTo(finishX - 2.5, trackTop + trackH + 8);
+        ctx.moveTo(finishX + 3.5, trackTop - 8);
+        ctx.lineTo(finishX + 3.5, trackTop + trackH + 8);
+        ctx.stroke();
+        ctx.restore();
       }
 
       // ===== HORSES =====
@@ -287,27 +309,43 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         };
       });
 
-      // Draw back to front
+      // Draw back to front — trailing horses render first, so leaders
+      // sit on top if they overlap.
       const sorted = [...horseData].sort((a, b) => a.pos - b.pos);
+
+      // Identify current leader for the winner glow effect at race end
+      const leaderId = sorted.length > 0 ? sorted[sorted.length - 1].entry.horseId : null;
+      const isResultsPhase = phase === "results";
 
       for (const h of sorted) {
         const hx = (h.pos / 100) * W * 1.2 - scrollX + 30;
         const hy = trackTop + h.lane * laneH + laneH * 0.5;
 
-        // Dust puffs
-        if (isActive && h.pos > 5) {
-          const dustCol = isTurf ? "rgba(80,100,60," : "rgba(140,120,90,";
-          for (let d = 0; d < 4; d++) {
-            const age = (fc + d * 7 + h.lane * 3) % 20;
-            const alpha = Math.max(0, 0.2 - age * 0.01);
-            ctx.fillStyle = dustCol + alpha + ")";
-            ctx.beginPath();
-            ctx.arc(hx - 20 - d * 6 - age * 0.5, hy + 8, 2.5 - age * 0.08, 0, Math.PI * 2);
-            ctx.fill();
-          }
+        const rgb = hexToRgbTuple(h.silksColor);
+        const isLeader = h.entry.horseId === leaderId;
+        const winnerGlow = isResultsPhase && isLeader;
+
+        // ===== DUST TRAIL =====
+        // Horizontal blurred color gradient behind the horse.
+        // Matches teaser: "linear-gradient(90deg, color00, color55)" with blur.
+        if (isActive && h.pos > 3) {
+          const trailLen = Math.min(140, Math.max(40, hx));
+          const trailH = laneH * 0.22;
+          const trailX = hx - trailLen - 10;
+          const trailY = hy - trailH / 2 + laneH * 0.08;
+
+          ctx.save();
+          // Canvas filter blur — mirrors CSS filter: blur(6px)
+          ctx.filter = "blur(7px)";
+          const grad = ctx.createLinearGradient(trailX, 0, trailX + trailLen, 0);
+          grad.addColorStop(0, `rgba(${rgb}, 0)`);
+          grad.addColorStop(1, `rgba(${rgb}, 0.42)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(trailX, trailY, trailLen, trailH);
+          ctx.restore();
         }
 
-        // Determine animation row and frame
+        // ===== SPRITE FRAME SELECTION =====
         let rowY: number;
         let frameCount: number;
         let animSpeed: number;
@@ -317,7 +355,6 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
           frameCount = SPRITE.GALLOP_FRAMES;
           animSpeed = 0.15;
         } else {
-          // Idle animation for closed/betting phase
           rowY = SPRITE.ROW_IDLE_RIGHT;
           frameCount = SPRITE.IDLE_FRAMES;
           animSpeed = 0.03;
@@ -328,148 +365,251 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         const srcX = frameIdx * SPRITE.FRAME_W;
         const srcY = rowY;
 
-        // Rendered size
         const rw = SPRITE.FRAME_W * spriteScale;
         const rh = SPRITE.FRAME_H * spriteScale;
-
-        // Position: center sprite vertically in lane, offset horizontally so head is at hx
         const drawX = hx - rw * 0.3;
         const drawY = hy - rh * 0.6;
 
-        // Draw shadow
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
-        ctx.beginPath();
-        ctx.ellipse(hx, hy + rh * 0.3, rw * 0.35, rh * 0.08, 0, 0, Math.PI * 2);
-        ctx.fill();
+        // ===== DROP-SHADOW GLOW =====
+        // ctx.shadowBlur applies to the next drawImage calls. We set a
+        // soft dark shadow for every horse for depth; winner gets an
+        // additional colored glow on top.
+        ctx.save();
+        ctx.shadowColor = winnerGlow
+          ? `rgba(${rgb}, 0.9)`
+          : "rgba(0, 0, 0, 0.55)";
+        ctx.shadowBlur = winnerGlow ? 28 : 10;
+        ctx.shadowOffsetY = winnerGlow ? 0 : 3;
 
-        // Enable pixel-art rendering (nearest neighbor)
         ctx.imageSmoothingEnabled = false;
 
-        // Draw body sprite
+        // Draw body
         const bodyImg = loadImage(h.paths.body);
         if (bodyImg.complete) {
-          ctx.drawImage(bodyImg, srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H, drawX, drawY, rw, rh);
+          ctx.drawImage(
+            bodyImg,
+            srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H,
+            drawX, drawY, rw, rh
+          );
         }
-
-        // Draw hair overlay (same frame position — sheets are aligned)
+        // Draw hair
         const hairImg = loadImage(h.paths.hair);
         if (hairImg.complete) {
-          ctx.drawImage(hairImg, srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H, drawX, drawY, rw, rh);
+          ctx.drawImage(
+            hairImg,
+            srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H,
+            drawX, drawY, rw, rh
+          );
         }
-
-        // Draw face marking overlay
+        // Draw face marking
         if (h.paths.face) {
           const faceImg = loadImage(h.paths.face);
           if (faceImg.complete) {
-            ctx.drawImage(faceImg, srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H, drawX, drawY, rw, rh);
+            ctx.drawImage(
+              faceImg,
+              srcX, srcY, SPRITE.FRAME_W, SPRITE.FRAME_H,
+              drawX, drawY, rw, rh
+            );
           }
         }
-
-        // Re-enable smoothing for UI elements
         ctx.imageSmoothingEnabled = true;
+        ctx.restore();
 
-        // Gate number badge — tucked close to top of sprite
+        // ===== GATE BADGE =====
+        // Restyled: dark pill with thin silks-color border + white number.
+        // Scales with UI so it's legible on streamer-sized canvases.
         const badgeX = hx;
-        const badgeY = drawY + 2;
-        ctx.fillStyle = h.silksColor + "CC";
-        const numW = 12;
-        const numH = 10;
+        const numW = Math.round(18 * UI_SCALE);
+        const numH = Math.round(14 * UI_SCALE);
+        const badgeY = drawY + Math.round(4 * UI_SCALE);
+        const badgeFontSize = Math.round(10 * UI_SCALE);
+        ctx.save();
+        ctx.fillStyle = "rgba(8, 8, 13, 0.85)";
         ctx.beginPath();
-        ctx.roundRect(badgeX - numW / 2, badgeY - numH, numW, numH, 2.5);
+        ctx.roundRect(badgeX - numW / 2, badgeY - numH, numW, numH, 3 * UI_SCALE);
         ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.25)";
-        ctx.lineWidth = 0.6;
+        ctx.strokeStyle = `rgba(${rgb}, 0.9)`;
+        ctx.lineWidth = Math.max(1, UI_SCALE);
         ctx.stroke();
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 8px sans-serif";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.font = `900 ${badgeFontSize}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(String(h.entry.gatePosition), badgeX, badgeY - numH / 2);
+        ctx.fillText(String(h.entry.gatePosition), badgeX, badgeY - numH / 2 + 0.5);
+        ctx.restore();
       }
 
-      // ===== WEATHER =====
+      // ===== WEATHER (kept — still a real state indicator) =====
       if (ground === "heavy") {
+        ctx.save();
+        ctx.strokeStyle = "rgba(160, 180, 210, 0.12)";
+        ctx.lineWidth = 0.8;
         for (let r = 0; r < 50; r++) {
           const rx = ((fc * 1.5 + r * 41) % W);
           const ry = ((fc * 4 + r * 29) % H);
-          ctx.strokeStyle = "rgba(160,180,210,0.15)";
-          ctx.lineWidth = 0.8;
-          ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 4, ry + 10); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx - 4, ry + 10);
+          ctx.stroke();
         }
-        ctx.fillStyle = "rgba(0,0,20,0.06)";
+        ctx.fillStyle = "rgba(0, 0, 20, 0.05)";
         ctx.fillRect(0, 0, W, H);
+        ctx.restore();
       } else if (ground === "soft") {
+        ctx.save();
+        ctx.strokeStyle = "rgba(160, 180, 210, 0.07)";
+        ctx.lineWidth = 0.6;
         for (let r = 0; r < 20; r++) {
           const rx = ((fc * 1.2 + r * 67) % W);
           const ry = ((fc * 3 + r * 43) % H);
-          ctx.strokeStyle = "rgba(160,180,210,0.08)";
-          ctx.lineWidth = 0.6;
-          ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 3, ry + 7); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx - 3, ry + 7);
+          ctx.stroke();
         }
+        ctx.restore();
       }
 
       // ===== GATES COUNTDOWN OVERLAY =====
       if (isClosed) {
-        // Semi-transparent overlay
-        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        // Semi-transparent dark scrim
+        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
         ctx.fillRect(0, 0, W, H);
 
-        // Countdown number
-        const countdownSize = Math.min(W * 0.15, 80);
+        // Countdown number — scales with canvas, no cap on desktop so
+        // streamers get a huge readable timer.
+        const countdownSize = Math.min(W * 0.16, 280);
+        ctx.save();
         ctx.font = `900 ${countdownSize}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        // Glow effect
         if (timeRemaining <= 3) {
-          ctx.shadowColor = "rgba(245,158,11,0.6)";
-          ctx.shadowBlur = 30;
+          ctx.shadowColor = "rgba(245, 158, 11, 0.7)";
+          ctx.shadowBlur = 48;
           ctx.fillStyle = "#F59E0B";
         } else {
-          ctx.shadowColor = "rgba(255,255,255,0.3)";
-          ctx.shadowBlur = 20;
-          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.shadowColor = "rgba(139, 92, 246, 0.5)";
+          ctx.shadowBlur = 32;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
         }
         ctx.fillText(String(timeRemaining), W / 2, H * 0.42);
+        ctx.restore();
 
-        // Reset shadow
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-
-        // Label
-        ctx.font = `700 ${Math.min(W * 0.025, 12)}px sans-serif`;
-        ctx.fillStyle = "rgba(255,255,255,0.35)";
-        ctx.letterSpacing = "0.2em";
-        ctx.fillText(timeRemaining <= 3 ? "STARTING" : "GATES LOADING", W / 2, H * 0.42 + countdownSize * 0.6);
+        // Label — uppercase, wide-tracked, muted
+        const labelSize = Math.min(W * 0.022, 32);
+        ctx.save();
+        ctx.font = `700 ${labelSize}px sans-serif`;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        // Manual letter-spacing by drawing chars individually
+        const label = timeRemaining <= 3 ? "STARTING" : "GATES LOADING";
+        const spacing = labelSize * 0.28;
+        const charWidths = Array.from(label).map(c => ctx.measureText(c).width);
+        const totalW = charWidths.reduce((a, b) => a + b, 0) + spacing * (label.length - 1);
+        let cx = W / 2 - totalW / 2;
+        for (let i = 0; i < label.length; i++) {
+          ctx.textAlign = "left";
+          ctx.fillText(label[i], cx, H * 0.42 + countdownSize * 0.62);
+          cx += charWidths[i] + spacing;
+        }
+        ctx.restore();
       }
 
-      // ===== POSITION OVERLAY =====
+      // ===== POSITION OVERLAY (leaderboard) =====
       if (isRacing) {
         const leaderboard = [...horseData].sort((a, b) => b.pos - a.pos);
-        const panelW = 88;
-        const rowH = 13;
-        const panelH = leaderboard.length * rowH + 8;
-        const panelX = W - panelW - 6;
-        const panelY = 4;
 
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        // Everything scales from UI_SCALE so the panel stays legible at
+        // streamer canvas sizes without overwhelming mobile.
+        const panelPadX = Math.round(12 * UI_SCALE);
+        const panelPadY = Math.round(10 * UI_SCALE);
+        const rowH = Math.round(18 * UI_SCALE);
+        const panelW = Math.round(140 * UI_SCALE);
+        const panelH = leaderboard.length * rowH + panelPadY * 2;
+        const panelX = W - panelW - Math.round(12 * UI_SCALE);
+        const panelY = Math.round(12 * UI_SCALE);
+        const numFont = Math.round(11 * UI_SCALE);
+        const nameFont = Math.round(11 * UI_SCALE);
+        const swatchW = Math.round(6 * UI_SCALE);
+        const swatchH = Math.round(12 * UI_SCALE);
+        const pipR = Math.max(2, Math.round(3 * UI_SCALE));
+
+        ctx.save();
+
+        // Panel background — dark card with thin hairline border (teaser style)
+        ctx.fillStyle = "rgba(15, 15, 24, 0.82)";
         ctx.beginPath();
-        ctx.roundRect(panelX, panelY, panelW, panelH, 4);
+        ctx.roundRect(panelX, panelY, panelW, panelH, 8 * UI_SCALE);
         ctx.fill();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
 
-        ctx.font = "bold 8px monospace";
         ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+
         leaderboard.forEach((h, i) => {
-          const ry = panelY + 5 + i * rowH;
+          const ry = panelY + panelPadY + i * rowH + rowH / 2;
+          const rgb = hexToRgbTuple(h.silksColor);
+
+          // Color swatch
           ctx.fillStyle = h.silksColor;
           ctx.beginPath();
-          ctx.roundRect(panelX + 4, ry, 6, 9, 1.5);
+          ctx.roundRect(
+            panelX + panelPadX,
+            ry - swatchH / 2,
+            swatchW,
+            swatchH,
+            Math.max(1.5, UI_SCALE * 1.5)
+          );
           ctx.fill();
-          ctx.fillStyle = i === 0 ? "rgba(255,220,80,0.9)" : "rgba(255,255,255,0.5)";
-          ctx.fillText(`${h.entry.gatePosition}`, panelX + 14, ry + 8);
-          ctx.fillStyle = i === 0 ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.5)";
-          ctx.fillText(h.entry.horse.name.split(" ")[0], panelX + 24, ry + 8);
+
+          // Gate number
+          ctx.fillStyle =
+            i === 0
+              ? "rgba(255, 255, 255, 0.95)"
+              : "rgba(255, 255, 255, 0.4)";
+          ctx.font = `900 ${numFont}px ui-monospace, monospace`;
+          ctx.fillText(
+            String(h.entry.gatePosition).padStart(2, "0"),
+            panelX + panelPadX + swatchW + Math.round(6 * UI_SCALE),
+            ry
+          );
+
+          // Horse name (first word only to fit)
+          ctx.fillStyle =
+            i === 0
+              ? "rgba(255, 255, 255, 0.9)"
+              : "rgba(255, 255, 255, 0.35)";
+          ctx.font = `700 ${nameFont}px sans-serif`;
+          const firstName = h.entry.horse.name.split(" ")[0];
+          ctx.fillText(
+            firstName.toUpperCase(),
+            panelX + panelPadX + swatchW + Math.round(28 * UI_SCALE),
+            ry
+          );
+
+          // Leader pip — glowing dot in silks colour on rank 1
+          if (i === 0) {
+            ctx.fillStyle = `rgba(${rgb}, 1)`;
+            ctx.shadowColor = `rgba(${rgb}, 0.9)`;
+            ctx.shadowBlur = 8 * UI_SCALE;
+            ctx.beginPath();
+            ctx.arc(
+              panelX + panelW - Math.round(12 * UI_SCALE),
+              ry,
+              pipR,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+            ctx.shadowBlur = 0;
+          }
         });
+
+        ctx.restore();
       }
 
       animRef.current = requestAnimationFrame(draw);
@@ -480,7 +620,10 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
   }, [canvasSize, entries, phase, timeRemaining, raceDuration, ground, getTargetProgress]);
 
   return (
-    <div ref={containerRef} className="rounded-2xl border border-white/[0.06] overflow-hidden bg-[#080810] w-full">
+    <div
+      ref={containerRef}
+      className="rounded-2xl border border-white/[0.06] overflow-hidden bg-[#08080D] w-full"
+    >
       <canvas
         ref={canvasRef}
         style={{ width: "100%", height: canvasSize.h, display: "block" }}
