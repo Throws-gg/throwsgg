@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
+import { track } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils";
 
 // ======= TYPES =======
@@ -111,17 +112,19 @@ export default function ReferralsPage() {
   const handleCopy = useCallback(() => {
     if (!fullReferralLink) return;
     navigator.clipboard.writeText(fullReferralLink);
+    track("referral_link_copied", { referral_code: referralCode });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [fullReferralLink]);
+  }, [fullReferralLink, referralCode]);
 
   const handleShareX = useCallback(() => {
     if (!fullReferralLink) return;
+    track("referral_shared_x", { referral_code: referralCode });
     const text = encodeURIComponent(
       `bet on AI horse racing at throws.gg\n\nnew race every 3 min, provably fair, crypto-native\n\nuse my link: ${fullReferralLink}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
-  }, [fullReferralLink]);
+  }, [fullReferralLink, referralCode]);
 
   const handleClaim = useCallback(async () => {
     if (!userId || claiming || !data) return;
@@ -135,6 +138,10 @@ export default function ReferralsPage() {
       });
       const json = await res.json();
       if (res.ok && json.success) {
+        track("referral_earnings_claimed", {
+          amount_usd: json.claimed,
+          new_balance: json.newBalance,
+        });
         setClaimResult({ amount: json.claimed });
         setBalance(json.newBalance);
         await fetchData();

@@ -39,6 +39,9 @@ function calcRacePhase(status: string, bettingClosesAt: string): { phase: RacePh
 
 const HORSE_SPRITES = ["🐎", "🏇", "🐴", "🐎", "🏇", "🐴", "🐎", "🏇"];
 
+// Session-level bet counter (survives across component re-renders but resets on page reload)
+let sessionBetCount = 0;
+
 // ======= MAIN PAGE =======
 
 export default function RacingPage() {
@@ -133,18 +136,25 @@ export default function RacingPage() {
             // Sound effects
             if (totalWinPayout > 0) {
               playWin(totalWinPayout);
+              const totalStaked = wonBets.reduce((s, b) => s + b.amount, 0);
               track("bet_won", {
+                race_id: state.currentRace.id,
                 race_number: state.currentRace.raceNumber,
                 total_payout: totalWinPayout,
+                total_staked: totalStaked,
+                profit_usd: totalWinPayout - totalStaked,
                 winning_bets: wonBets.length,
                 top_odds: topWinBet?.lockedOdds,
+                top_payout: topWinBet?.payout || 0,
               });
             } else {
               play("loss");
+              const lostStake = currentBets.reduce((s, b) => s + b.amount, 0);
               track("bet_lost", {
+                race_id: state.currentRace.id,
                 race_number: state.currentRace.raceNumber,
                 lost_bets: currentBets.length,
-                total_staked: currentBets.reduce((s, b) => s + b.amount, 0),
+                total_staked: lostStake,
               });
             }
 
@@ -186,6 +196,20 @@ export default function RacingPage() {
     } catch { /* retry next poll */ }
     setLoading(false);
   }, []);
+
+  // Track page view once when first race loads
+  const trackedViewRef = useRef(false);
+  useEffect(() => {
+    if (raceState?.currentRace && !trackedViewRef.current) {
+      trackedViewRef.current = true;
+      track("race_viewed", {
+        race_id: raceState.currentRace.id,
+        race_number: raceState.currentRace.raceNumber,
+        phase,
+        logged_in: !!userId,
+      });
+    }
+  }, [raceState?.currentRace?.id]);
 
   // Poll + local timer
   useEffect(() => {
@@ -637,13 +661,33 @@ function HorseBetCard({
           status: "pending",
           betType: data.bet.betType || betType,
         });
+        sessionBetCount++;
+        const store = useUserStore.getState();
+
+        // Track bonus conversion — this is a key retention moment
+        if (data.bonusConverted) {
+          track("bonus_converted", {
+            cash_balance_after: data.newBalance,
+            total_wagered: store.totalWagered + data.bet.amount,
+          });
+        }
+
         track("bet_placed", {
+          race_id: raceId,
           horse_name: entry.horse.name,
           horse_id: entry.horseId,
           bet_type: betType,
-          amount: data.bet.amount,
+          amount_usd: data.bet.amount,
           locked_odds: data.bet.lockedOdds,
           potential_payout: data.bet.potentialPayout,
+          is_first_bet: sessionBetCount === 1 && store.totalWagered <= data.bet.amount,
+          from_cash: data.fromCash || 0,
+          from_bonus: data.fromBonus || 0,
+          wagering_counted: data.wageringCounted || false,
+          bonus_converted: data.bonusConverted || false,
+          balance_after: data.newBalance,
+          bonus_balance_after: data.bonusBalance || 0,
+          session_bet_number: sessionBetCount,
         });
         setResult({ success: true, message: `Bet placed! Potential win: $${potentialPayout.toFixed(2)}` });
         setTimeout(() => { onClose(); setResult(null); }, 1500);

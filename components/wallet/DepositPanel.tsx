@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { useFundWallet } from "@privy-io/react-auth/solana";
 import { useDepositMonitor } from "@/hooks/useDepositMonitor";
+import { track } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils";
 
 export function DepositPanel() {
@@ -24,14 +25,25 @@ export function DepositPanel() {
   // Monitor for incoming deposits
   const { lastDeposit, checking, refresh } = useDepositMonitor(walletAddress || null);
 
+  // Track when the deposit panel is viewed
+  const trackedRef = useRef(false);
+  useEffect(() => {
+    if (walletAddress && !trackedRef.current) {
+      trackedRef.current = true;
+      track("deposit_initiated", { method: activeTab });
+    }
+  }, [walletAddress, activeTab]);
+
   const handleBuyWithCard = useCallback(() => {
     if (!walletAddress) return;
+    track("deposit_buy_clicked", { method: "card", wallet_address: walletAddress });
     fundWallet({ address: walletAddress });
   }, [walletAddress, fundWallet]);
 
   const handleCopyAddress = useCallback(() => {
     if (!walletAddress) return;
     navigator.clipboard.writeText(walletAddress);
+    track("deposit_address_copied", { wallet_address: walletAddress });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [walletAddress]);
