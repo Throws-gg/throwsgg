@@ -20,10 +20,10 @@ export const FIELD_SIZE = 8;
 export const TOTAL_HORSES = 16;
 
 export const BANKROLL_RACING = {
-  INITIAL: 10_000,
-  MAX_BET: 100,                    // Hard cap $100 per bet
-  MAX_BET_RATIO: 0.01,            // 1% of bankroll
-  MAX_RACE_LIABILITY_RATIO: 0.03, // 3% of bankroll per race
+  INITIAL: 9_000,                   // ~$14K AUD launch bankroll in USD
+  MAX_BET: 100,                     // Hard cap $100 per bet
+  MAX_BET_RATIO: 0.01,             // 1% of bankroll
+  MAX_RACE_LIABILITY_RATIO: 0.08,  // 8% of bankroll per horse per race ($720 max payout)
   // Odds caps + overround source of truth live in lib/racing/odds-engine.ts
 } as const;
 
