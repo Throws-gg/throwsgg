@@ -167,7 +167,15 @@ export async function createNextRace() {
     };
   });
 
-  await db().from("race_entries").insert(entries);
+  const { error: entriesError } = await db().from("race_entries").insert(entries);
+
+  if (entriesError) {
+    // Entry insertion failed — delete the orphan race so the next tick
+    // doesn't get stuck trying to advance a race with no horses.
+    console.error("Failed to insert race entries, deleting orphan race:", entriesError);
+    await db().from("races").delete().eq("id", race.id);
+    throw new Error(`Failed to insert race entries: ${entriesError.message}`);
+  }
 
   return race;
 }
@@ -195,7 +203,13 @@ export async function runRace(raceId: string) {
     .select("horse_id, snapshot_form, horses(id, speed, stamina, form, consistency, ground_preference)")
     .eq("race_id", raceId);
 
-  if (!entries) throw new Error("No entries found");
+  if (!entries || entries.length === 0) {
+    // Orphan race with no entries — can happen if entry insertion failed
+    // during createNextRace. Mark as settled so the engine moves on.
+    console.error(`Race ${raceId} has no entries — marking as settled to unblock`);
+    await db().from("races").update({ status: "settled" }).eq("id", raceId);
+    throw new Error("Race has no entries — auto-settled orphan");
+  }
 
   // Use the form value snapshotted at race-creation time — NOT the horse's
   // current form — so the simulation remains verifiable after subsequent
