@@ -24,17 +24,19 @@ export const OVERROUND = 1.156;  // 115.6% — ~13.5% house edge, early-stage sa
 // Target range: 12-15% while we're building up the bankroll. Real bookmakers
 // typically sit at 10-15% so this is firmly in range.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
-// Odds caps — kept wide so the book percentage lands near OVERROUND.
-// Earlier 40x cap on win odds created a structural dead zone at the longshot
-// end: true 1% horses were priced at 40x and the overall book drifted above
-// the configured overround. 100x lets genuine bombs price honestly.
-// Liability is capped separately via BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO.
+// Odds caps — kept wide so the book percentage lands near OVERROUND and
+// longshots price honestly. A horse with true 0.5% prob needs ~170x to
+// break even for the bettor; under 100x we were charging the bettor a
+// structural 50%+ house edge on bombs. Liability is capped separately
+// via BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO so a single 200x bet on
+// a $100 max stake can only expose us to $20k (2× the $10k bankroll max
+// race liability — clipped in bet placement).
 const MIN_WIN_ODDS = 1.30;
-const MAX_WIN_ODDS = 100.00;
+const MAX_WIN_ODDS = 200.00;
 const MIN_PLACE_ODDS = 1.10;
-const MAX_PLACE_ODDS = 25.00;
+const MAX_PLACE_ODDS = 40.00;
 const MIN_SHOW_ODDS = 1.05;
-const MAX_SHOW_ODDS = 12.00;
+const MAX_SHOW_ODDS = 18.00;
 
 /**
  * Monte Carlo odds — runs the simulation 1500 times to estimate
@@ -81,14 +83,22 @@ export function calculateOddsMonteCarlo(
 
   const result = new Map<number, FullOdds>();
 
+  // Laplace smoothing per horse: (count + alpha) / (iterations + 2*alpha).
+  // Treat each horse as running a Bernoulli trial per race (won/didn't,
+  // placed/didn't, showed/didn't). Adding alpha=1 pseudo-observations of
+  // "win" and "loss" prevents zero-win horses from being priced at the cap.
+  //
+  // At 4000 iterations a horse with 0 wins gets probability 1/4002 ≈ 0.025%,
+  // pricing at ~345x (clamped to 100x cap). A horse with 1 win gets
+  // 2/4002 ≈ 0.05%, pricing at ~173x (still clamped). Only horses with
+  // more than ~5 wins in the sim break away from the cap.
+  const alpha = 1;
+  const denom = iterations + 2 * alpha;
+
   for (const h of horses) {
-    // Floors must match the cap ceilings — a 100x win cap needs floor >=
-    // 1/(100*OVERROUND) = 0.00865, otherwise the Monte Carlo slams horses
-    // into the floor, prices them at 100x, and they never win. Use 0.01
-    // (=1% true prob → prices near the 100x cap with room to spare).
-    const winProb = Math.max((winCounts.get(h.id) || 0) / iterations, 0.01);
-    const placeProb = Math.max((placeCounts.get(h.id) || 0) / iterations, 0.035);
-    const showProb = Math.max((showCounts.get(h.id) || 0) / iterations, 0.075);
+    const winProb = ((winCounts.get(h.id) || 0) + alpha) / denom;
+    const placeProb = ((placeCounts.get(h.id) || 0) + alpha) / denom;
+    const showProb = ((showCounts.get(h.id) || 0) + alpha) / denom;
 
     // Apply overround to each
     let winOdds = 1 / (winProb * OVERROUND);
