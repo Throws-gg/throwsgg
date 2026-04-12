@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { cn } from "@/lib/utils";
 
 // ======= TYPES =======
@@ -74,6 +75,7 @@ function formatDate(dateStr: string): string {
 export default function ReferralsPage() {
   const userId = useUserStore((s) => s.userId);
   const setBalance = useUserStore((s) => s.setBalance);
+  const authedFetch = useAuthedFetch();
 
   const [data, setData] = useState<ReferralsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,14 +89,14 @@ export default function ReferralsPage() {
       return;
     }
     try {
-      const res = await fetch(`/api/referrals/me?userId=${userId}`);
+      const res = await authedFetch(`/api/referrals/me?userId=${userId}`);
       const json = await res.json();
       if (res.ok) setData(json);
     } catch {
       // silent
     }
     setLoading(false);
-  }, [userId]);
+  }, [userId, authedFetch]);
 
   useEffect(() => {
     fetchData();
@@ -127,9 +129,8 @@ export default function ReferralsPage() {
 
     setClaiming(true);
     try {
-      const res = await fetch("/api/referrals/claim", {
+      const res = await authedFetch("/api/referrals/claim", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
       });
       const json = await res.json();
