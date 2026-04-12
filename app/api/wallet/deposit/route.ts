@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getWalletBalances } from "@/lib/wallet/solana";
+import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 
 /**
  * POST /api/wallet/deposit
@@ -109,8 +110,41 @@ export async function POST(request: NextRequest) {
     );
 
     if (balanceError) {
+      trackServer(userId, "deposit_failed", {
+        amount_usd: totalNewUsd,
+        currency: newUsdc > 0 ? "USDC" : "SOL",
+        chain: "solana",
+        error_type: "balance_credit_failed",
+      });
       return NextResponse.json({ error: "Failed to credit balance" }, { status: 500 });
     }
+
+    // Check if this is the user's first deposit
+    const { data: depositCount } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("type", "deposit")
+      .gt("amount", 0);
+
+    const isFirstDeposit = (depositCount as unknown as number) <= 1;
+
+    trackServer(userId, "deposit_completed", {
+      amount_usd: totalNewUsd,
+      currency: newUsdc > 0 ? "USDC" : "SOL",
+      chain: "solana",
+      new_usdc: newUsdc,
+      new_sol_usd: newSolUsd,
+      new_balance: parseFloat(newBalance),
+      is_first_deposit: isFirstDeposit,
+      wallet_address: walletAddress,
+    });
+
+    // Update user properties
+    identifyServer(userId, {
+      last_deposit_at: new Date().toISOString(),
+      has_deposited: true,
+    });
 
     return NextResponse.json({
       status: "deposited",

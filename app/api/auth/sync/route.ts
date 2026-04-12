@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthToken, isDevMode } from "@/lib/auth/privy";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 
 interface SignupBonusResult {
   granted: boolean;
@@ -163,6 +164,44 @@ export async function POST(request: NextRequest) {
       .single();
 
     const u = freshUser || newUser;
+
+    // --- Analytics: track signup ---
+    trackServer(u.id, "signup_completed", {
+      method: email ? "email" : "wallet",
+      has_referral: !!referrerId,
+      referral_code: referralCode,
+      referrer_id: referrerId,
+      signup_bonus_granted: bonusResult.granted,
+      signup_bonus_amount: bonusResult.bonus_amount || 0,
+    });
+
+    identifyServer(u.id, {
+      username: u.username,
+      signup_date: new Date().toISOString(),
+      acquisition_source: referrerId ? "referral" : "organic",
+      referral_code_used: referralCode,
+      has_deposited: false,
+      deposit_tier: "micro",
+      lifetime_wagered: 0,
+      lifetime_deposited: 0,
+      lifetime_withdrawn: 0,
+    });
+
+    if (referrerId) {
+      trackServer(referrerId, "referral_signup", {
+        referred_user_id: u.id,
+        referred_username: u.username,
+      });
+    }
+
+    if (bonusResult.granted) {
+      trackServer(u.id, "signup_bonus_granted", {
+        bonus_amount: bonusResult.bonus_amount,
+        wagering_required: bonusResult.wagering_required,
+        expires_at: bonusResult.expires_at,
+        signups_remaining: bonusResult.signups_remaining,
+      });
+    }
 
     return NextResponse.json({
       user: {

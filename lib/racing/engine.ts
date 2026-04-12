@@ -3,6 +3,7 @@ import { generateServerSeed, hashServerSeed } from "@/lib/game/provably-fair";
 import { simulateRace, selectRaceField } from "./simulation";
 import { calculateOddsMonteCarlo, HOUSE_EDGE } from "./odds-engine";
 import { postRaceCommentary } from "./commentary";
+import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 import { RACE_TIMING } from "./constants";
 import type { RaceStatus, GroundCondition, RaceDistance } from "./constants";
 
@@ -314,6 +315,13 @@ export async function settleRace(raceId: string) {
 
   if (error) throw new Error(`Settlement failed: ${error.message}`);
 
+  // Track race settlement + individual bet outcomes
+  try {
+    await trackRaceSettlement(raceId, race.race_number);
+  } catch {
+    // Non-fatal
+  }
+
   // Credit referral rewards for every bet in this race
   try {
     await creditReferralRewards(raceId);
@@ -337,6 +345,96 @@ export async function settleRace(raceId: string) {
     await postRaceBigWins(raceId);
   } catch {
     // Non-fatal
+  }
+}
+
+/**
+ * Track race settlement analytics — fires a race_completed event and
+ * individual bet_settled events for each bettor.
+ */
+async function trackRaceSettlement(raceId: string, raceNumber: number) {
+  // Get the settled race data
+  const { data: raceData } = await db()
+    .from("races")
+    .select("total_bet_amount, total_payout, house_profit, bet_count, distance, ground, winning_horse_id")
+    .eq("id", raceId)
+    .single();
+
+  if (!raceData) return;
+
+  const handle = parseFloat(String(raceData.total_bet_amount));
+  const totalPayout = parseFloat(String(raceData.total_payout));
+  const ggr = parseFloat(String(raceData.house_profit));
+  const holdPct = handle > 0 ? (ggr / handle) * 100 : 0;
+
+  // Fire race_completed event (attributed to a system user)
+  trackServer("system", "race_completed", {
+    race_id: raceId,
+    race_number: raceNumber,
+    total_handle: handle,
+    total_payout: totalPayout,
+    ggr,
+    hold_percent: Math.round(holdPct * 100) / 100,
+    num_bettors: raceData.bet_count,
+    distance: raceData.distance,
+    ground: raceData.ground,
+    winning_horse_id: raceData.winning_horse_id,
+  });
+
+  // Get all settled bets for individual bet_settled events
+  const { data: bets } = await db()
+    .from("race_bets")
+    .select("id, user_id, amount, locked_odds, payout, status, bet_type, horse_id, created_at, settled_at")
+    .eq("race_id", raceId)
+    .in("status", ["won", "lost"]);
+
+  if (!bets) return;
+
+  for (const bet of bets) {
+    const stake = parseFloat(String(bet.amount));
+    const payout = parseFloat(String(bet.payout || 0));
+    const profit = payout - stake;
+    const settledAt = bet.settled_at ? new Date(bet.settled_at).getTime() : Date.now();
+    const createdAt = new Date(bet.created_at).getTime();
+    const settlementTime = settledAt - createdAt;
+
+    trackServer(bet.user_id, "bet_settled", {
+      race_id: raceId,
+      race_number: raceNumber,
+      bet_id: bet.id,
+      bet_type: bet.bet_type,
+      horse_id: bet.horse_id,
+      amount_usd: stake,
+      odds: parseFloat(String(bet.locked_odds)),
+      payout_usd: payout,
+      result: bet.status,
+      profit_usd: profit,
+      settlement_time_ms: settlementTime,
+    });
+
+    // Update user properties with running totals
+    const { data: user } = await db()
+      .from("users")
+      .select("total_wagered, total_profit, balance, bonus_balance")
+      .eq("id", bet.user_id)
+      .single();
+
+    if (user) {
+      const totalWagered = parseFloat(String(user.total_wagered));
+      const depositTier = totalWagered >= 10000 ? "whale"
+        : totalWagered >= 1000 ? "medium"
+        : totalWagered >= 100 ? "small"
+        : "micro";
+
+      identifyServer(bet.user_id, {
+        lifetime_wagered: totalWagered,
+        lifetime_profit: parseFloat(String(user.total_profit)),
+        current_balance: parseFloat(String(user.balance)),
+        bonus_balance: parseFloat(String(user.bonus_balance || 0)),
+        deposit_tier: depositTier,
+        last_bet_at: new Date().toISOString(),
+      });
+    }
   }
 }
 

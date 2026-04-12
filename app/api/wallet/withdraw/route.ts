@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRequest } from "@/lib/auth/verify-request";
 import { isValidSolanaAddress, sendUsdc } from "@/lib/wallet/send-usdc";
 import { LIMITS, WITHDRAWAL_FEES } from "@/lib/game/constants";
+import { trackServer } from "@/lib/analytics/posthog-server";
 
 // Auto-send threshold — withdrawals above this require manual admin approval
 const AUTO_SEND_THRESHOLD = 100;
@@ -194,6 +195,17 @@ export async function POST(request: NextRequest) {
           })
           .eq("id", txRecord.id);
 
+        trackServer(user.dbUserId, "withdrawal_completed", {
+          amount_usd: amount,
+          fee_usd: fee,
+          currency: "USDC",
+          chain: "solana",
+          tx_hash: txHash,
+          new_balance: parseFloat(newBalance),
+          auto_sent: true,
+          wallet_address: destinationAddress,
+        });
+
         return NextResponse.json({
           status: "completed",
           transactionId: txRecord.id,
@@ -222,6 +234,14 @@ export async function POST(request: NextRequest) {
           .update({ status: "failed" })
           .eq("id", txRecord.id);
 
+        trackServer(user.dbUserId, "withdrawal_failed", {
+          amount_usd: amount,
+          currency: "USDC",
+          chain: "solana",
+          error_type: "on_chain_send_failed",
+          wallet_address: destinationAddress,
+        });
+
         return NextResponse.json(
           { error: "Withdrawal failed — balance refunded. Please try again." },
           { status: 500 }
@@ -234,6 +254,16 @@ export async function POST(request: NextRequest) {
       .from("transactions")
       .update({ status: "pending" })
       .eq("id", txRecord.id);
+
+    trackServer(user.dbUserId, "withdrawal_requested", {
+      amount_usd: amount,
+      fee_usd: fee,
+      currency: "USDC",
+      chain: "solana",
+      new_balance: parseFloat(newBalance),
+      requires_review: true,
+      wallet_address: destinationAddress,
+    });
 
     return NextResponse.json({
       status: "pending",

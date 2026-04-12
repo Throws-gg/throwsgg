@@ -69,9 +69,24 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
         });
 
         // Identify the user in analytics
+        // Identify with full user properties for segmentation
+        const totalWagered = data.user.totalWagered || 0;
+        const depositTier = totalWagered >= 10000 ? "whale"
+          : totalWagered >= 1000 ? "medium"
+          : totalWagered >= 100 ? "small"
+          : "micro";
+
         identify(data.user.id, {
           username: data.user.username,
-          total_wagered: data.user.totalWagered,
+          total_wagered: totalWagered,
+          total_profit: data.user.totalProfit || 0,
+          current_balance: data.user.balance || 0,
+          bonus_balance: data.user.bonusBalance || 0,
+          has_active_bonus: (data.user.bonusBalance || 0) > 0,
+          wagering_remaining: data.user.wageringRemaining || 0,
+          deposit_tier: depositTier,
+          referral_code: data.user.referralCode,
+          device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "desktop",
         });
 
         // If user was created with this referral, clear the stored code
