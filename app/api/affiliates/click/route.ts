@@ -27,14 +27,12 @@ export async function POST(request: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Validate that the code exists as a user's referral_code
-    const { data: referrer } = await supabase
-      .from("users")
-      .select("id")
-      .eq("referral_code", code)
-      .maybeSingle();
+    // Resolve code → user_id. Checks vanity slugs first, then referral_code.
+    const { data: resolvedUserId } = await supabase.rpc("resolve_referral_code", {
+      p_code: code,
+    });
 
-    if (!referrer) {
+    if (!resolvedUserId) {
       return NextResponse.json({ valid: false, reason: "not_found" }, { status: 200 });
     }
 

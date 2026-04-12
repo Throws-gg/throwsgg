@@ -87,17 +87,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Look up referrer if a code was provided
+    // Look up referrer if a code was provided.
+    // Resolves vanity slugs (e.g. "drake") first, then standard referral codes.
     let referrerId: string | null = null;
     if (referralCode) {
-      const normalizedCode = referralCode.trim().toUpperCase();
-      const { data: referrer } = await supabase
-        .from("users")
-        .select("id")
-        .eq("referral_code", normalizedCode)
-        .single();
-      if (referrer) {
-        referrerId = referrer.id;
+      const { data: resolvedUserId } = await supabase.rpc("resolve_referral_code", {
+        p_code: referralCode,
+      });
+      if (resolvedUserId) {
+        referrerId = resolvedUserId;
       }
     }
 

@@ -69,12 +69,25 @@ function fmtDateTime(iso: string): string {
 // Main page
 // ============================================
 
+interface VanitySlug {
+  id: string;
+  slug: string;
+  userId: string;
+  username: string;
+  referralCode: string;
+  note: string | null;
+  active: boolean;
+  clickCount: number;
+  createdAt: string;
+}
+
 export default function AdminAffiliatesPage() {
   const userId = useUserStore((s) => s.userId);
-  const [tab, setTab] = useState<"applications" | "active">("applications");
+  const [tab, setTab] = useState<"applications" | "active" | "vanity">("applications");
   const [statusFilter, setStatusFilter] = useState<AppStatus>("pending");
   const [applications, setApplications] = useState<Application[]>([]);
   const [affiliates, setAffiliates] = useState<Affiliate[]>([]);
+  const [vanitySlugs, setVanitySlugs] = useState<VanitySlug[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Application | null>(null);
 
@@ -82,11 +95,19 @@ export default function AdminAffiliatesPage() {
     try {
       const params = new URLSearchParams({ status: statusFilter });
       if (userId) params.set("userId", userId);
-      const res = await fetch(`/api/admin/affiliates/list?${params}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setApplications(data.applications || []);
-      setAffiliates(data.affiliates || []);
+      const [appRes, vanityRes] = await Promise.all([
+        fetch(`/api/admin/affiliates/list?${params}`),
+        fetch(`/api/admin/affiliates/vanity?userId=${userId || ""}`),
+      ]);
+      if (appRes.ok) {
+        const data = await appRes.json();
+        setApplications(data.applications || []);
+        setAffiliates(data.affiliates || []);
+      }
+      if (vanityRes.ok) {
+        const vData = await vanityRes.json();
+        setVanitySlugs(vData.slugs || []);
+      }
     } catch (err) {
       console.error("fetch failed:", err);
     }
@@ -140,6 +161,13 @@ export default function AdminAffiliatesPage() {
           code="b"
           label="active affiliates"
           count={counts.approved > 0 ? counts.approved : undefined}
+        />
+        <TabButton
+          active={tab === "vanity"}
+          onClick={() => setTab("vanity")}
+          code="c"
+          label="custom links"
+          count={vanitySlugs.length > 0 ? vanitySlugs.length : undefined}
         />
       </div>
 
@@ -318,6 +346,15 @@ export default function AdminAffiliatesPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ======== Vanity Links Tab ======== */}
+      {tab === "vanity" && (
+        <VanityLinksPanel
+          slugs={vanitySlugs}
+          userId={userId}
+          onRefresh={fetchData}
+        />
       )}
 
       {/* ======== Review Modal ======== */}
@@ -686,6 +723,219 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <div className="text-[10px] font-mono uppercase tracking-wider text-white/35 mb-1">{label}</div>
       <div className="text-sm text-white">{children}</div>
+    </div>
+  );
+}
+
+// ============================================
+// Vanity Links Panel
+// ============================================
+
+function VanityLinksPanel({
+  slugs,
+  userId,
+  onRefresh,
+}: {
+  slugs: VanitySlug[];
+  userId: string | null;
+  onRefresh: () => void;
+}) {
+  const [newSlug, setNewSlug] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    if (!newSlug || !newUsername || !userId) return;
+    setCreating(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/admin/affiliates/vanity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: newSlug,
+          username: newUsername,
+          note: newNote || null,
+          userId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to create");
+      } else {
+        setSuccess(`Created: throws.gg/${data.vanitySlug.slug}`);
+        setNewSlug("");
+        setNewUsername("");
+        setNewNote("");
+        onRefresh();
+      }
+    } catch {
+      setError("Network error");
+    }
+    setCreating(false);
+  };
+
+  const handleDeactivate = async (slugId: string) => {
+    if (!userId) return;
+    try {
+      await fetch("/api/admin/affiliates/vanity", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slugId, userId }),
+      });
+      onRefresh();
+    } catch {
+      // silent
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Create new vanity link */}
+      <div className="rounded border border-white/[0.06] bg-[#0a0a12] p-5 space-y-4">
+        <div>
+          <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.25em] mb-1">
+            create custom link
+          </p>
+          <p className="text-xs text-white/40">
+            Create a vanity URL like <code className="text-violet/80">throws.gg/drake</code> that maps to a user&apos;s affiliate account.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[9px] font-mono uppercase tracking-wider text-white/40 mb-1.5">
+              slug
+            </label>
+            <div className="flex items-center gap-0">
+              <span className="text-[10px] text-white/25 font-mono bg-white/[0.03] border border-r-0 border-white/[0.08] rounded-l px-2 py-2">
+                throws.gg/
+              </span>
+              <input
+                type="text"
+                value={newSlug}
+                onChange={(e) => setNewSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                placeholder="drake"
+                className="flex-1 px-3 py-2 rounded-r bg-white/[0.03] border border-white/[0.08] text-xs text-white placeholder-white/25 focus:outline-none focus:border-violet/50 font-mono"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[9px] font-mono uppercase tracking-wider text-white/40 mb-1.5">
+              username
+            </label>
+            <input
+              type="text"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+              placeholder="degen_a1b2c3"
+              className="w-full px-3 py-2 rounded bg-white/[0.03] border border-white/[0.08] text-xs text-white placeholder-white/25 focus:outline-none focus:border-violet/50 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[9px] font-mono uppercase tracking-wider text-white/40 mb-1.5">
+              note (internal)
+            </label>
+            <input
+              type="text"
+              value={newNote}
+              onChange={(e) => setNewNote(e.target.value)}
+              placeholder="Drake partnership Q3"
+              className="w-full px-3 py-2 rounded bg-white/[0.03] border border-white/[0.08] text-xs text-white placeholder-white/25 focus:outline-none focus:border-violet/50"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleCreate}
+            disabled={!newSlug || !newUsername || creating}
+            className={cn(
+              "px-5 py-2 text-xs font-mono font-bold uppercase tracking-wider rounded transition-all",
+              newSlug && newUsername
+                ? "bg-violet/15 border border-violet/40 text-violet hover:bg-violet/25"
+                : "bg-white/[0.03] border border-white/[0.06] text-white/30 cursor-not-allowed"
+            )}
+          >
+            {creating ? "creating..." : "create link"}
+          </button>
+
+          {error && <span className="text-xs text-red font-mono">{error}</span>}
+          {success && <span className="text-xs text-green font-mono">{success}</span>}
+        </div>
+      </div>
+
+      {/* Existing vanity links */}
+      {slugs.length > 0 ? (
+        <div className="rounded border border-white/[0.06] bg-[#0a0a12] overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-white/[0.06] bg-white/[0.02]">
+                <Th>link</Th>
+                <Th>user</Th>
+                <Th>note</Th>
+                <Th className="text-right">clicks</Th>
+                <Th>status</Th>
+                <Th className="text-right pr-4">action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {slugs.map((s) => (
+                <tr
+                  key={s.id}
+                  className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors"
+                >
+                  <Td>
+                    <code className="text-[11px] font-mono text-violet/90">
+                      throws.gg/{s.slug}
+                    </code>
+                  </Td>
+                  <Td>
+                    <span className="text-white/70 font-bold">@{s.username}</span>
+                    <span className="text-[10px] text-white/25 font-mono ml-1.5">
+                      {s.referralCode}
+                    </span>
+                  </Td>
+                  <Td className="text-[10px] text-white/40">{s.note || "—"}</Td>
+                  <Td className="text-right font-mono text-white/60 font-bold tabular-nums">
+                    {s.clickCount}
+                  </Td>
+                  <Td>
+                    <span
+                      className={cn(
+                        "text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                        s.active
+                          ? "bg-green/10 text-green border-green/25"
+                          : "bg-white/[0.04] text-white/40 border-white/10"
+                      )}
+                    >
+                      {s.active ? "active" : "inactive"}
+                    </span>
+                  </Td>
+                  <Td className="text-right pr-4">
+                    {s.active && (
+                      <button
+                        onClick={() => handleDeactivate(s.id)}
+                        className="text-[10px] font-mono uppercase tracking-wider text-red/70 hover:text-red"
+                      >
+                        deactivate
+                      </button>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState message="no custom links created yet" />
+      )}
     </div>
   );
 }
