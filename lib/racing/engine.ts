@@ -464,7 +464,7 @@ async function trackRaceSettlement(raceId: string, raceNumber: number) {
  * cross the 3x threshold, which releases their backlog of pending rewards.
  */
 async function creditReferralRewards(raceId: string) {
-  // Get all settled bets from this race with bettor's referrer info
+  // Get all settled bets with bettor's referrer info + referrer's affiliate status
   const { data: bets } = await db()
     .from("race_bets")
     .select("id, user_id, amount, payout, status, users!inner(referrer_id)")
@@ -473,7 +473,24 @@ async function creditReferralRewards(raceId: string) {
 
   if (!bets || bets.length === 0) return;
 
-  // Track unique referred users so we only trigger activation once per user
+  // Pre-fetch which referrers are approved affiliates vs regular referrers
+  const referrerIds = new Set<string>();
+  for (const bet of bets) {
+    const user = bet.users as unknown as { referrer_id: string | null };
+    if (user?.referrer_id) referrerIds.add(user.referrer_id);
+  }
+  if (referrerIds.size === 0) return;
+
+  const { data: referrers } = await db()
+    .from("users")
+    .select("id, is_affiliate")
+    .in("id", Array.from(referrerIds));
+
+  const affiliateSet = new Set(
+    (referrers || []).filter((r) => r.is_affiliate).map((r) => r.id)
+  );
+
+  // Track unique referred users for affiliate activation gate
   const referredUserIds = new Set<string>();
 
   for (const bet of bets) {
@@ -481,30 +498,42 @@ async function creditReferralRewards(raceId: string) {
     const referrerId = user?.referrer_id;
     if (!referrerId) continue;
 
-    referredUserIds.add(bet.user_id);
-
     const stake = parseFloat(String(bet.amount));
     const payout = parseFloat(String(bet.payout || 0));
-    // NGR per bet = stake the house kept (losing bet) = stake - payout.
-    // Winning bets have NGR <= 0 and the RPC skips them.
     const ngr = stake - payout;
 
-    await db().rpc("accrue_referral_reward", {
-      p_referrer_id: referrerId,
-      p_referred_id: bet.user_id,
-      p_race_bet_id: bet.id,
-      p_stake: stake,
-      p_ngr: ngr,
-    });
+    if (affiliateSet.has(referrerId)) {
+      // AFFILIATE PATH: tier-based rates (35/40/45% NGR), weekly rollup,
+      // 7-day hold, activation gate. Full lifecycle.
+      referredUserIds.add(bet.user_id);
+      await db().rpc("accrue_referral_reward", {
+        p_referrer_id: referrerId,
+        p_referred_id: bet.user_id,
+        p_race_bet_id: bet.id,
+        p_stake: stake,
+        p_ngr: ngr,
+      });
+    } else {
+      // REFERRAL PATH: flat 10% of NGR, immediate credit, 90-day window
+      // per referred user. No tiers, no hold period.
+      await db().rpc("accrue_simple_referral_reward", {
+        p_referrer_id: referrerId,
+        p_referred_id: bet.user_id,
+        p_race_bet_id: bet.id,
+        p_stake: stake,
+        p_ngr: ngr,
+      });
+    }
   }
 
-  // After accrual, check activation gate for each referred user
-  // (parallel — each RPC is self-contained)
-  await Promise.all(
-    Array.from(referredUserIds).map((uid) =>
-      db().rpc("check_referral_activation", { p_user_id: uid }).then(() => {})
-    )
-  );
+  // Affiliate-only: check activation gate for each referred user
+  if (referredUserIds.size > 0) {
+    await Promise.all(
+      Array.from(referredUserIds).map((uid) =>
+        db().rpc("check_referral_activation", { p_user_id: uid }).then(() => {})
+      )
+    );
+  }
 }
 
 async function updateHorseStats(raceId: string) {
