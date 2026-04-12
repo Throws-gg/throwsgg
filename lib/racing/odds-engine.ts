@@ -19,10 +19,12 @@ export interface FullOdds {
   showOdds: number;       // Decimal odds for show (top 3)
 }
 
-export const OVERROUND = 1.156;  // 115.6% — ~13.5% house edge, early-stage safety margin
-// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.1349 (13.49%)
-// Target range: 12-15% while we're building up the bankroll. Real bookmakers
-// typically sit at 10-15% so this is firmly in range.
+export const OVERROUND = 1.087;  // 108.7% — ~8% house edge
+// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.0800 (8.00%)
+// Competitive with virtual sports (5-8%) and lower than real bookmakers
+// (10-15%). Provably fair + transparent, so needs to be defensible when
+// users inspect the verify page. Higher than pure RNG games (~1-4%)
+// because the product has depth (form data, conditions, 8-horse fields).
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
 // Odds caps — kept wide so the book percentage lands near OVERROUND and
 // longshots price honestly. A horse with true 0.5% prob needs ~170x to
