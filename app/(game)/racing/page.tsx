@@ -245,8 +245,23 @@ export default function RacingPage() {
     <div className="flex-1 max-w-2xl xl:max-w-[1400px] mx-auto px-4 xl:px-6 py-3 xl:py-4 space-y-3 xl:space-y-4 overflow-x-hidden w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-base font-bold">Race #{currentRace.raceNumber}</h1>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold shrink-0">Race #{currentRace.raceNumber}</h1>
+            {/* Provably fair hash — visible inline */}
+            {currentRace.serverSeedHash && (
+              <button
+                onClick={() => {
+                  const text = currentRace.serverSeedHash;
+                  navigator.clipboard.writeText(text);
+                }}
+                title={`Server seed hash: ${currentRace.serverSeedHash}\nClick to copy`}
+                className="text-[9px] font-mono text-white/15 truncate max-w-[120px] sm:max-w-[180px] hover:text-white/30 transition-colors cursor-pointer"
+              >
+                {currentRace.serverSeedHash.slice(0, 16)}...
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <span>{currentRace.distance}m</span>
             <span className="capitalize">{currentRace.ground}</span>
