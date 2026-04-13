@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import Image from "next/image";
 
 const REFERRAL_STORAGE_KEY = "throws_referral_code";
+const IS_LIVE = process.env.NEXT_PUBLIC_IS_LIVE === "true";
+const REDIRECT_TO = IS_LIVE ? "/racing" : "/";
 
 export default function ReferralLandingPage() {
   const router = useRouter();
@@ -43,11 +45,11 @@ export default function ReferralLandingPage() {
           }
           setStatus("valid");
           // Short delay so users see the "you've been referred" message
-          setTimeout(() => router.push("/"), 1800);
+          setTimeout(() => router.push(REDIRECT_TO), 1800);
         } else {
           setStatus("invalid");
           // Send to landing page after showing the error briefly
-          setTimeout(() => router.push("/"), 2500);
+          setTimeout(() => router.push(REDIRECT_TO), 2500);
         }
       })
       .catch(() => {
@@ -63,7 +65,7 @@ export default function ReferralLandingPage() {
           // localStorage not available
         }
         setStatus("valid");
-        setTimeout(() => router.push("/"), 1800);
+        setTimeout(() => router.push(REDIRECT_TO), 1800);
       });
 
     return () => {
@@ -150,7 +152,7 @@ export default function ReferralLandingPage() {
                   you've been invited.
                 </h1>
                 <p className="text-sm text-white/40">
-                  a friend wants you to join them at throws.gg
+                  connect your wallet and get <span className="text-gold font-bold">$20 in free bets</span> to start racing.
                 </p>
               </>
             )}

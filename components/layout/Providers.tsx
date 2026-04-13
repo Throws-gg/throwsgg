@@ -119,6 +119,7 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (ready && authenticated && user) {
+      initPostHog(); // Only load PostHog JS when user is authenticated
       syncUser();
     } else if (ready && !authenticated) {
       clearUser();
@@ -187,10 +188,6 @@ function PrivyWrapper({ children }: { children: React.ReactNode }) {
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    initPostHog();
-  }, []);
-
   return (
     <PrivyWrapper>
       <TooltipProvider>{children}</TooltipProvider>

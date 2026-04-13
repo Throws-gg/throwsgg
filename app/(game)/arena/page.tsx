@@ -17,7 +17,6 @@ import { WinnersBanner } from "@/components/game/WinnersBanner";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
-import { useSound } from "@/hooks/useSound";
 import type { BetType } from "@/lib/game/constants";
 
 // Map DB bet types to display names
@@ -45,7 +44,8 @@ export default function ArenaPage() {
 
   const { userId, username, balance, activeBets } = useUserStore();
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
-  const { play, playWin } = useSound();
+  const play = (_name: string) => {};
+  const playWin = (_amount: number) => {};
   const [bigWin, setBigWin] = useState<{
     amount: number;
     username?: string;

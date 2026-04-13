@@ -195,15 +195,9 @@ function VipProgress({ totalWagered }: { totalWagered: number }) {
 export default function ProfilePage() {
   const { userId, username, totalWagered, totalProfit, balance } = useUserStore();
 
-  // Placeholder stats for fields we don't track yet
-  const placeholderStats = useMemo(() => ({
-    winRate: 47.3,
-    totalBets: 284,
-    biggestWin: 388.0,
-    currentStreak: 3,
-    streakType: "W" as const,
-    memberSince: "Mar 2026",
-  }), []);
+  // Stats that need API data show "—" until we wire them up.
+  // Better to show honest zeros than fake numbers that destroy trust.
+  const hasBetHistory = totalWagered > 0;
 
   const currentTier = getVipTier(totalWagered);
 
@@ -249,19 +243,16 @@ export default function ProfilePage() {
                 <TierBadge tier={currentTier} size="sm" />
               </div>
               <div className="flex items-center gap-3 text-[11px] text-white/25">
-                <span>Member since {placeholderStats.memberSince}</span>
-                <span className="w-1 h-1 rounded-full bg-white/15" />
                 <span className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
                   Online
                 </span>
-              </div>
-              {/* Favourite game */}
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className="text-[9px] text-white/20 uppercase tracking-wider">Favourite:</span>
-                <span className="text-[10px] bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-0.5 text-white/40 font-medium">
-                  Racing
-                </span>
+                {hasBetHistory && (
+                  <>
+                    <span className="w-1 h-1 rounded-full bg-white/15" />
+                    <span>{totalWagered >= 1000 ? "Regular" : "New bettor"}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -292,29 +283,28 @@ export default function ProfilePage() {
             delay={0.35}
           />
           <StatCard
-            label="Win Rate"
-            value={`${placeholderStats.winRate}%`}
-            subValue="284 total bets"
+            label="Balance"
+            value={`$${balance.toFixed(2)}`}
+            color="text-green"
             delay={0.4}
           />
           <StatCard
-            label="Total Bets"
-            value={placeholderStats.totalBets.toLocaleString()}
-            subValue="Races only"
+            label="Win Rate"
+            value={hasBetHistory ? "—" : "—"}
+            subValue={hasBetHistory ? "coming soon" : "place your first bet"}
             delay={0.45}
           />
           <StatCard
             label="Biggest Win"
-            value={`$${placeholderStats.biggestWin.toFixed(2)}`}
-            subValue="Moon Shot @ 12.80x"
+            value={hasBetHistory ? "—" : "—"}
+            subValue={hasBetHistory ? "coming soon" : "could be you"}
             color="text-gold"
             delay={0.5}
           />
           <StatCard
-            label="Current Streak"
-            value={`${placeholderStats.currentStreak}${placeholderStats.streakType}`}
-            subValue={placeholderStats.streakType === "W" ? "On a roll" : "Bounce back incoming"}
-            color={placeholderStats.streakType === "W" ? "text-green" : "text-red"}
+            label="Streak"
+            value={hasBetHistory ? "—" : "—"}
+            subValue={hasBetHistory ? "coming soon" : "start a streak"}
             delay={0.55}
           />
         </div>
@@ -326,7 +316,10 @@ export default function ProfilePage() {
           transition={{ duration: 0.4, delay: 0.6 }}
           className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-5 space-y-3"
         >
-          <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">VIP Benefits</p>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">VIP Benefits</p>
+            <span className="text-[9px] text-white/20 font-mono uppercase tracking-wider">rolling out soon</span>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[

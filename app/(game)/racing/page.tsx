@@ -15,7 +15,6 @@ import { BigWinCelebration } from "@/components/game/BigWinCelebration";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
-import { useSound } from "@/hooks/useSound";
 import { WageringProgress } from "@/components/bonus/WageringProgress";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { track } from "@/lib/analytics/posthog";
@@ -68,7 +67,9 @@ export default function RacingPage() {
   const { userId, balance, username } = useUserStore();
   const { login } = useAuthActions();
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
-  const { play, playWin } = useSound();
+  // Sound hooks removed — no audio assets for racing yet
+  const play = (_name: string) => {};
+  const playWin = (_amount: number) => {};
   const authedFetch = useAuthedFetch();
 
   // Use ref so fetchState always sees latest bets without re-creating the callback
@@ -416,16 +417,19 @@ export default function RacingPage() {
           ))}
         </div>
 
-        {/* Sign in prompt at bottom of race card */}
+        {/* Connect wallet prompt at bottom of race card */}
         {!userId && isBetting && (
-          <div className="px-4 py-3 border-t border-white/[0.04]">
+          <div className="px-4 py-3 border-t border-white/[0.04] space-y-1.5">
             <button
               onClick={login}
-              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet to-magenta text-white font-bold text-sm
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-violet to-magenta text-white font-bold text-sm
                          hover:opacity-90 active:scale-[0.98] transition-all shadow-[0_4px_20px_rgba(139,92,246,0.2)]"
             >
-              Sign in to place bets
+              connect wallet — $20 free bet
             </button>
+            <p className="text-[10px] text-white/20 text-center">
+              pick a horse. the next race starts in seconds.
+            </p>
           </div>
         )}
       </div>
@@ -496,7 +500,10 @@ export default function RacingPage() {
                   </div>
                 )}
                 {bet.status === "lost" && (
-                  <span className="text-sm font-bold text-red/60 font-mono">-${bet.amount.toFixed(2)}</span>
+                  <div className="text-right">
+                    <span className="text-sm font-bold text-red/60 font-mono">-${bet.amount.toFixed(2)}</span>
+                    <p className="text-[9px] text-white/25 mt-0.5">next race soon</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -508,6 +515,22 @@ export default function RacingPage() {
       {isResults && currentRace.commentary && (
         <div className="rounded-xl border border-gold/10 bg-gold/[0.03] px-4 py-3">
           <p className="text-xs text-gold/60 italic">{currentRace.commentary}</p>
+        </div>
+      )}
+
+      {/* Next race nudge — Zeigarnik open loop */}
+      {isResults && timeRemaining > 0 && (
+        <div className="rounded-xl border border-violet/15 bg-violet/[0.03] px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-violet animate-pulse" />
+            <span className="text-xs text-white/50">next race in</span>
+            <span className="text-sm font-black font-mono tabular-nums text-violet">
+              {timeRemaining}s
+            </span>
+          </div>
+          <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider">
+            new field · new odds
+          </span>
         </div>
       )}
 
@@ -603,6 +626,7 @@ function HorseBetCard({
   onClose: () => void;
   onBetPlaced: (bet: { id: string; horseId: number; horseName: string; amount: number; lockedOdds: number; potentialPayout: number; status: string; betType: string }) => void;
 }) {
+  const { login: connectWallet } = useAuthActions();
   const [betAmount, setBetAmount] = useState(0);
   const [betType, setBetType] = useState<"win" | "place" | "show">("win");
   const [placing, setPlacing] = useState(false);
@@ -934,7 +958,21 @@ function HorseBetCard({
             )}
           </>
         ) : (
-          <p className="text-center text-white/30 text-xs py-2">Sign in to place bets</p>
+          <div className="space-y-2 py-1">
+            <button
+              onClick={() => {
+                onClose();
+                connectWallet();
+              }}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-violet to-magenta text-white font-bold text-sm
+                         hover:opacity-90 active:scale-[0.98] transition-all shadow-[0_4px_20px_rgba(139,92,246,0.2)]"
+            >
+              connect wallet — $20 free bet
+            </button>
+            <p className="text-[10px] text-white/20 text-center">
+              takes 10 seconds. bet on {h.name} before gates close.
+            </p>
+          </div>
         )}
       </motion.div>
     </motion.div>

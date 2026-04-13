@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import Image from "next/image";
-import { LiveWinsTicker } from "@/components/game/LiveWinsTicker";
+// LiveWinsTicker removed — was hardcoded fake data. Replace with real feed post-launch.
 import { track } from "@/lib/analytics/posthog";
 
 // ======= ANIMATED COUNTER =======
@@ -165,11 +165,23 @@ function LiveRacePreview() {
 
 // ======= MAIN PAGE =======
 
+const IS_LIVE = process.env.NEXT_PUBLIC_IS_LIVE === "true";
+
 export default function LandingPage() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bonusSpots, setBonusSpots] = useState<{ spotsLeft: number; enabled: boolean; amount: number } | null>(null);
+
+  // Fetch bonus spots for urgency counter (only when live)
+  useEffect(() => {
+    if (!IS_LIVE) return;
+    fetch("/api/bonus/status")
+      .then((r) => r.json())
+      .then((d) => setBonusSpots(d))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,8 +214,6 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-hidden">
-      <LiveWinsTicker />
-
       {/* ===== HERO SECTION ===== */}
       <section className="relative min-h-[100vh] flex flex-col items-center justify-center px-4 py-12 sm:py-20">
         {/* Ambient glow */}
@@ -240,17 +250,28 @@ export default function LandingPage() {
                 />
               </motion.div>
 
-              {/* Badge */}
+              {/* Badge — urgency counter when live, "gates open soon" pre-launch */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.1 }}
                 className="flex justify-center lg:justify-start"
               >
-                <div className="inline-flex items-center gap-2 bg-green/[0.06] border border-green/20 rounded-full px-3.5 py-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
-                  <span className="text-[10px] text-green/80 font-semibold tracking-wide uppercase">gates open soon</span>
-                </div>
+                {IS_LIVE && bonusSpots?.enabled && bonusSpots.spotsLeft > 0 ? (
+                  <div className="inline-flex items-center gap-2 bg-gold/[0.08] border border-gold/25 rounded-full px-3.5 py-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
+                    <span className="text-[10px] text-gold font-bold tracking-wide uppercase">
+                      ${bonusSpots.amount} free — {bonusSpots.spotsLeft} spots left
+                    </span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 bg-green/[0.06] border border-green/20 rounded-full px-3.5 py-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+                    <span className="text-[10px] text-green/80 font-semibold tracking-wide uppercase">
+                      {IS_LIVE ? "live now" : "gates open soon"}
+                    </span>
+                  </div>
+                )}
               </motion.div>
 
               {/* Headline */}
@@ -288,7 +309,22 @@ export default function LandingPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
               >
-                {!submitted ? (
+                {IS_LIVE ? (
+                  <div className="max-w-sm mx-auto lg:mx-0 space-y-3">
+                    <a
+                      href="/racing"
+                      className="group flex items-center justify-center gap-2 w-full px-8 py-4 rounded-xl bg-gradient-to-r from-violet to-magenta text-white font-bold text-sm
+                                 hover:opacity-90 active:scale-[0.98] transition-all
+                                 shadow-[0_4px_25px_rgba(139,92,246,0.3),0_0_60px_rgba(139,92,246,0.1)]"
+                    >
+                      start betting — $20 free
+                      <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                    </a>
+                    <p className="text-[10px] text-white/20 text-center lg:text-left">
+                      connect wallet. get $20 bonus. bet on the next race in under 60 seconds.
+                    </p>
+                  </div>
+                ) : !submitted ? (
                   <form onSubmit={handleSubmit} className="max-w-sm mx-auto lg:mx-0 space-y-2">
                     <div className="flex gap-2">
                       <input
@@ -325,6 +361,24 @@ export default function LandingPage() {
                   </div>
                 )}
               </motion.div>
+
+              {/* Secondary CTA — watch a race without signing up (only when live) */}
+              {IS_LIVE && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.6, delay: 0.6 }}
+                  className="max-w-sm mx-auto lg:mx-0"
+                >
+                  <a
+                    href="/racing"
+                    className="inline-flex items-center gap-2 text-[11px] text-white/30 hover:text-white/60 transition-colors font-mono uppercase tracking-wider"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+                    watch a live race →
+                  </a>
+                </motion.div>
+              )}
             </div>
 
             {/* Right — live race preview */}
@@ -355,11 +409,6 @@ export default function LandingPage() {
           </motion.div>
         </motion.div>
       </section>
-
-      {/* ===== ODDS TICKER ===== */}
-      <div className="border-y border-white/[0.04] py-3 bg-white/[0.01]">
-        <OddsTicker />
-      </div>
 
       {/* ===== STATS BAR ===== */}
       <section className="py-10 sm:py-16 px-4">
@@ -560,18 +609,42 @@ export default function LandingPage() {
 
         <div className="relative z-10 max-w-lg mx-auto text-center space-y-8">
           <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-[1.05]">
-            the gates open soon.
-            <br />
-            <span className="bg-gradient-to-r from-violet via-magenta to-cyan bg-clip-text text-transparent">
-              don&apos;t miss post time.
-            </span>
+            {IS_LIVE ? (
+              <>
+                the gates are open.
+                <br />
+                <span className="bg-gradient-to-r from-violet via-magenta to-cyan bg-clip-text text-transparent">
+                  get in before the next race.
+                </span>
+              </>
+            ) : (
+              <>
+                the gates open soon.
+                <br />
+                <span className="bg-gradient-to-r from-violet via-magenta to-cyan bg-clip-text text-transparent">
+                  don&apos;t miss post time.
+                </span>
+              </>
+            )}
           </h2>
 
           <p className="text-sm text-white/25">
-            early access = front of the grid when the gates crack. don&apos;t get left behind.
+            {IS_LIVE
+              ? "new race every 3 minutes. connect wallet, grab your $20 free bet, pick a horse."
+              : "early access = front of the grid when the gates crack. don't get left behind."}
           </p>
 
-          {!submitted ? (
+          {IS_LIVE ? (
+            <a
+              href="/racing"
+              className="group inline-flex items-center gap-2 px-10 py-4 rounded-xl bg-gradient-to-r from-violet to-magenta text-white font-bold text-sm
+                         hover:opacity-90 active:scale-[0.98] transition-all
+                         shadow-[0_4px_25px_rgba(139,92,246,0.3),0_0_60px_rgba(139,92,246,0.1)]"
+            >
+              start betting — $20 free
+              <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+            </a>
+          ) : !submitted ? (
             <form onSubmit={handleSubmit} className="max-w-sm mx-auto space-y-2">
               <div className="flex gap-2">
                 <input

@@ -292,35 +292,39 @@ export function RaceWinCard({
                 @{username}
               </div>
               <div style={{ color: "rgba(255,255,255,0.2)", fontSize: 10, fontStyle: "italic" }}>
-                they race. you bet.
+                they race. you bet. you profit.
               </div>
             </div>
           </div>
         </div>
 
         {/* Action buttons — below the card, not captured */}
-        <div className="flex gap-3 w-full max-w-[300px]">
-          <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="flex-1 py-2.5 rounded-lg bg-secondary border border-border text-sm font-bold text-foreground hover:bg-secondary/80 active:scale-[0.98] transition-all"
-          >
-            {downloading ? "..." : "save"}
-          </button>
+        <div className="flex flex-col gap-2 w-full max-w-[340px]">
+          {/* Primary: share to X — biggest button, this IS the viral loop */}
           <button
             onClick={handleShare}
             disabled={downloading}
-            className="flex-1 py-2.5 rounded-lg bg-violet text-white text-sm font-bold hover:bg-violet/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            className="w-full py-3.5 rounded-lg bg-violet text-white text-sm font-bold hover:bg-violet/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2
+                       shadow-[0_4px_20px_rgba(139,92,246,0.25)]"
           >
             <XIcon />
-            {copied ? "copied! paste in tweet" : downloading ? "..." : "share"}
+            {copied ? "copied! paste in tweet" : downloading ? "..." : "share win to X"}
           </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-all"
-          >
-            close
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex-1 py-2.5 rounded-lg bg-secondary border border-border text-sm font-bold text-foreground hover:bg-secondary/80 active:scale-[0.98] transition-all"
+            >
+              {downloading ? "..." : "save image"}
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-all"
+            >
+              close
+            </button>
+          </div>
         </div>
       </div>
     </div>
