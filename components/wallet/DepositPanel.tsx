@@ -127,6 +127,7 @@ export function DepositPanel() {
               <p className="text-white/35 text-xs">
                 Instantly fund your account with a card, Apple Pay, or Google Pay
               </p>
+              <p className="text-[10px] text-white/25 font-mono">minimum $25 USD</p>
             </div>
 
             <button

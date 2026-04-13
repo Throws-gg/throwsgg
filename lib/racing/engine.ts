@@ -177,6 +177,31 @@ export async function createNextRace() {
     throw new Error(`Failed to insert race entries: ${entriesError.message}`);
   }
 
+  // Post "gates open" system message to chat
+  try {
+    const horseNames = await db()
+      .from("race_entries")
+      .select("horses(name)")
+      .eq("race_id", race.id)
+      .order("gate_position", { ascending: true });
+
+    const names = (horseNames.data || [])
+      .map((e) => (e.horses as unknown as { name: string })?.name)
+      .filter(Boolean)
+      .slice(0, 3);
+
+    const preview = names.length > 0 ? ` — ${names.join(", ")} + ${8 - names.length} more` : "";
+
+    await db().from("chat_messages").insert({
+      user_id: null,
+      username: "throws.gg",
+      message: `🏇 Race #${raceNumber} gates open — ${distance}m on ${ground}${preview}. place your bets.`,
+      is_system: true,
+    });
+  } catch {
+    // Non-fatal — don't block race creation if chat insert fails
+  }
+
   return race;
 }
 

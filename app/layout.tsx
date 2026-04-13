@@ -27,7 +27,8 @@ export default function RootLayout({
       <body className="min-h-screen flex flex-col bg-background text-foreground antialiased">
         <Providers>
           <Navbar />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 pb-16 md:pb-0">{children}</main>
+          <MobileNav />
           <SignupBonusModal />
         </Providers>
       </body>

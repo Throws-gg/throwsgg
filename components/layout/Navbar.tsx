@@ -97,6 +97,9 @@ function UserMenu() {
   const initials = username?.slice(0, 2).toUpperCase() || "??";
   const displayName = username || "player";
 
+  // VIP tier from totalWagered
+  const tierColor = totalWagered >= 250_000 ? "#8B5CF6" : totalWagered >= 50_000 ? "#06B6D4" : totalWagered >= 10_000 ? "#F59E0B" : totalWagered >= 1_000 ? "#C0C0C0" : "#CD7F32";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -120,10 +123,10 @@ function UserMenu() {
             ring-2 ring-background"
           aria-hidden
         />
-        <Avatar className="h-7 w-7 ring-1 ring-violet/50">
+        <Avatar className="h-7 w-7 ring-1" style={{ ["--tw-ring-color" as string]: `${tierColor}80` }}>
           <AvatarFallback
-            className="bg-gradient-to-br from-violet to-magenta text-white
-              text-[10px] font-black tracking-wider"
+            className="text-white text-[10px] font-black tracking-wider"
+            style={{ background: `linear-gradient(135deg, ${tierColor}40, ${tierColor}20)` }}
           >
             {initials}
           </AvatarFallback>

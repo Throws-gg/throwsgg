@@ -689,14 +689,36 @@ export default function LandingPage() {
               @throwsgg
             </a>
           </div>
+          {/* Founder note — Pratfall Effect: being small + honest builds trust */}
+          <p className="text-[10px] text-white/15 pt-4">
+            built solo by a degen, for degens. every race provably fair. every payout on-chain.
+          </p>
         </div>
       </section>
 
       {/* ===== FOOTER ===== */}
-      <footer className="border-t border-white/[0.03] px-4 py-6">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Image src="/logo-horse.png" alt="throws.gg" width={80} height={20} className="h-4 w-auto opacity-15" />
-          <span className="text-[10px] text-white/10">&copy; 2026 throws.gg</span>
+      <footer className="border-t border-white/[0.03] px-4 py-8">
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            {[
+              { href: "/verify", label: "provably fair" },
+              { href: "/affiliates", label: "affiliates" },
+              { href: "https://x.com/throwsgg", label: "X / twitter", external: true },
+            ].map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                {...("external" in link ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                className="text-[11px] text-white/20 hover:text-white/50 transition-colors"
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+          <div className="flex items-center justify-between">
+            <Image src="/logo-horse.png" alt="throws.gg" width={80} height={20} className="h-4 w-auto opacity-15" />
+            <span className="text-[10px] text-white/10">&copy; 2026 throws.gg</span>
+          </div>
         </div>
       </footer>
     </div>

@@ -121,7 +121,7 @@ export default function ReferralsPage() {
     if (!fullReferralLink) return;
     track("referral_shared_x", { referral_code: referralCode });
     const text = encodeURIComponent(
-      `bet on AI horse racing at throws.gg\n\nnew race every 3 min, provably fair, crypto-native\n\nuse my link: ${fullReferralLink}`
+      `16 AI horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullReferralLink}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   }, [fullReferralLink, referralCode]);
