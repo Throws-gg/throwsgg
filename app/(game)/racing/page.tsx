@@ -569,8 +569,14 @@ export default function RacingPage() {
 
       {/* Commentary */}
       {isResults && currentRace.commentary && (
-        <div className="rounded-xl border border-gold/10 bg-gold/[0.03] px-4 py-3">
-          <p className="text-xs text-gold/60 italic">{currentRace.commentary}</p>
+        <div className="rounded-xl border border-gold/15 bg-gold/[0.04] px-4 py-3.5">
+          <div className="flex items-start gap-2.5">
+            <span className="text-gold/50 text-sm mt-0.5">📢</span>
+            <div>
+              <p className="text-[10px] text-gold/40 uppercase tracking-wider font-bold mb-1">race commentary</p>
+              <p className="text-sm text-gold/70 italic leading-relaxed">{currentRace.commentary}</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -616,6 +622,8 @@ export default function RacingPage() {
             raceId={currentRace.id}
             userId={userId}
             balance={balance}
+            bonusBalance={useUserStore.getState().bonusBalance}
+            wageringRemaining={useUserStore.getState().wageringRemaining}
             raceDistance={currentRace.distance}
             raceGround={currentRace.ground}
             authedFetch={authedFetch}
@@ -674,9 +682,10 @@ export default function RacingPage() {
 // ======= HORSE BET CARD (glassmorphic) =======
 
 function HorseBetCard({
-  entry, raceId, userId, balance, raceDistance, raceGround, authedFetch, onClose, onBetPlaced,
+  entry, raceId, userId, balance, bonusBalance = 0, wageringRemaining = 0, raceDistance, raceGround, authedFetch, onClose, onBetPlaced,
 }: {
   entry: RaceEntry; raceId: string; userId: string | null; balance: number;
+  bonusBalance?: number; wageringRemaining?: number;
   raceDistance: number; raceGround: string;
   authedFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onClose: () => void;
@@ -961,9 +970,11 @@ function HorseBetCard({
           <>
             <div className="flex gap-1.5">
               {CHIPS.map((chip) => {
+                const totalFunds = balance + bonusBalance;
+                const bonusActive = bonusBalance > 0 || wageringRemaining > 0;
                 const maxAllowed = Math.min(
-                  BANKROLL_RACING.MAX_BET,
-                  balance,
+                  bonusActive ? 5 : BANKROLL_RACING.MAX_BET, // $5 max while bonus active
+                  totalFunds,
                   ...(maxLiabilityBet !== null ? [maxLiabilityBet] : [])
                 );
                 const atMax = betAmount >= maxAllowed;
@@ -971,13 +982,12 @@ function HorseBetCard({
                   <button key={chip}
                     onClick={() => setBetAmount((prev) => {
                       const next = prev + chip;
-                      // Cap to max allowed (balance, max bet, or liability limit)
                       return Math.round(Math.min(next, maxAllowed) * 100) / 100;
                     })}
-                    disabled={balance < 0.10 || atMax}
+                    disabled={totalFunds < 0.10 || atMax}
                     className={cn("flex-1 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95",
                       "bg-white/[0.04] border-white/[0.08] text-white/70 hover:bg-white/[0.06]",
-                      (balance < 0.10 || atMax) && "opacity-25")}>
+                      (totalFunds < 0.10 || atMax) && "opacity-25")}>
                     +${chip < 1 ? chip.toFixed(2) : chip}
                   </button>
                 );
