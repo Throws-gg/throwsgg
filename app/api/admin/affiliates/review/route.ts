@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     newStatus = "approved";
     newLinkedUserId = linkedUserId;
 
-    // If a linked user was provided, sanity-check it exists
+    // If a linked user was provided, sanity-check it exists and flip is_affiliate
     if (linkedUserId) {
       const { data: linkedUser } = await supabase
         .from("users")
@@ -69,12 +69,32 @@ export async function POST(request: NextRequest) {
       if (!linkedUser) {
         return NextResponse.json({ error: "linked user not found" }, { status: 400 });
       }
+      // Activate the affiliate commission path for this user
+      await supabase
+        .from("users")
+        .update({ is_affiliate: true })
+        .eq("id", linkedUserId);
     }
   } else if (action === "reject") {
     newStatus = "rejected";
   } else {
     // terminate — used for already-approved affiliates that need to be kicked
     newStatus = "terminated";
+
+    // Revoke affiliate status if the application had a linked user
+    if (app.status === "approved") {
+      const { data: existing } = await supabase
+        .from("affiliate_applications")
+        .select("linked_user_id")
+        .eq("id", applicationId)
+        .single();
+      if (existing?.linked_user_id) {
+        await supabase
+          .from("users")
+          .update({ is_affiliate: false })
+          .eq("id", existing.linked_user_id);
+      }
+    }
   }
 
   const { error: updateError } = await supabase
