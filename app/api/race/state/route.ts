@@ -13,16 +13,61 @@ export async function GET() {
   const supabase = createAdminClient();
 
   try {
-    // Advance engine in background — don't block state response
-    tick().catch(() => {});
-
     // Check cache first — return immediately if fresh
     const cacheNow = Date.now();
     if (cachedState && cacheNow - cachedState.timestamp < CACHE_TTL) {
+      // Still advance the engine in the background so the next cache miss
+      // gets fresh data, but don't block this response.
+      tick().catch(() => {});
       return NextResponse.json(cachedState.data);
     }
 
-    const current = await getCurrentRace();
+    // On cache miss, peek at the current race and decide: if the race looks
+    // fresh (its server-side phase roughly matches wall clock), we can advance
+    // the engine in background. If the race is *stale* (wall clock far past a
+    // phase boundary), we block on a tick so the first-load user sees correct
+    // state instead of the stale DB row.
+    let current = await getCurrentRace();
+    const staleThresholdMs = 2000;
+    if (current) {
+      const bettingClosesMs = new Date(current.betting_closes_at).getTime();
+      const closedEndMs = bettingClosesMs + RACE_TIMING.CLOSED_DURATION * 1000;
+      const raceEndMs = closedEndMs + RACE_TIMING.RACE_DURATION * 1000;
+      const resultsEndMs = raceEndMs + RACE_TIMING.RESULTS_DURATION * 1000;
+
+      const isStale =
+        (current.status === "betting" && cacheNow >= bettingClosesMs + staleThresholdMs) ||
+        (current.status === "closed" && cacheNow >= closedEndMs + staleThresholdMs) ||
+        (current.status === "racing" && cacheNow >= raceEndMs + staleThresholdMs) ||
+        (current.status === "settled" && cacheNow >= resultsEndMs + staleThresholdMs);
+
+      if (isStale) {
+        // Block on ticks so the response reflects the catch-up. A single
+        // tick only advances one phase boundary (betting→closed, etc.), so
+        // iterate up to a safety cap in case we're many phases behind.
+        for (let i = 0; i < 5; i++) {
+          await tick().catch(() => {});
+          current = await getCurrentRace();
+          if (!current) break;
+          const bc = new Date(current.betting_closes_at).getTime();
+          const ce = bc + RACE_TIMING.CLOSED_DURATION * 1000;
+          const re = ce + RACE_TIMING.RACE_DURATION * 1000;
+          const rx = re + RACE_TIMING.RESULTS_DURATION * 1000;
+          const stillStale =
+            (current.status === "betting" && cacheNow >= bc + staleThresholdMs) ||
+            (current.status === "closed" && cacheNow >= ce + staleThresholdMs) ||
+            (current.status === "racing" && cacheNow >= re + staleThresholdMs) ||
+            (current.status === "settled" && cacheNow >= rx + staleThresholdMs);
+          if (!stillStale) break;
+        }
+      } else {
+        tick().catch(() => {});
+      }
+    } else {
+      // No current race at all — block on a tick to kick one off.
+      await tick().catch(() => {});
+      current = await getCurrentRace();
+    }
 
     if (!current) {
       return NextResponse.json({ waiting: true, message: "No active race" });

@@ -37,9 +37,20 @@ function calcRacePhase(status: string, bettingClosesAt: string, raceStartsAt?: s
   // Optimistic phase advancement — if the wall clock has moved past a boundary
   // but the server tick hasn't yet updated `status`, advance the phase client
   // side so the UI never stalls at "0 seconds" waiting for the cron to catch up.
-  if (status === "betting" && now >= closes) status = "closed";
-  if (status === "closed" && now >= closedEnd) status = "racing";
-  if (status === "racing" && now >= raceEnd) status = "settled";
+  //
+  // We only advance a SINGLE step: we never jump more than one phase ahead of
+  // the server. If the server is many phases behind (e.g. the user just opened
+  // the site and the background tick is still catching up), chaining the
+  // advancement would briefly render phases that have no backing server data
+  // (no checkpoints, no finish positions) and the UI would flash through
+  // "racing → closed → racing" as the real server state lands.
+  if (status === "betting" && now >= closes) {
+    status = "closed";
+  } else if (status === "closed" && now >= closedEnd) {
+    status = "racing";
+  } else if (status === "racing" && now >= raceEnd) {
+    status = "settled";
+  }
 
   if (status === "betting") return { phase: "betting", timeRemaining: Math.max(0, Math.ceil((closes - now) / 1000)) };
   if (status === "closed") return { phase: "closed", timeRemaining: Math.max(0, Math.ceil((closedEnd - now) / 1000)) };
