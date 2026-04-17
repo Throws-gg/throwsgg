@@ -266,6 +266,7 @@ export interface RaceState {
     serverSeedHash: string;
     bettingOpensAt: string;
     bettingClosesAt: string;
+    raceStartsAt?: string;
     betCount: number;
     totalVolume: number;
     entries: RaceEntry[];

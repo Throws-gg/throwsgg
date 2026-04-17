@@ -11,6 +11,9 @@ interface RaceCanvasProps {
   timeRemaining: number;
   raceDuration: number;
   ground: string;
+  raceStartsAt?: string;
+  bettingClosesAt?: string;
+  closedDuration?: number;
 }
 
 // ===== SPRITE IMAGE CACHE =====
@@ -42,7 +45,7 @@ function hexToRgbTuple(hex: string): string {
   return `${r}, ${g}, ${b}`;
 }
 
-export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDuration, ground }: RaceCanvasProps) {
+export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDuration, ground, raceStartsAt, bettingClosesAt, closedDuration }: RaceCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const frameRef = useRef(0);
@@ -100,13 +103,60 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
     return () => window.removeEventListener("resize", resize);
   }, []);
 
+  // Track a live elapsed-seconds counter that updates every animation frame.
+  // This is independent of the polling-based timeRemaining which can be stale
+  // or jump to 0 when the server tick is delayed.
+  const raceElapsedRef = useRef(0);
+
+  useEffect(() => {
+    if (phase !== "racing" || !raceStartsAt) {
+      raceElapsedRef.current = 0;
+      return;
+    }
+    const startMs = new Date(raceStartsAt).getTime();
+    let raf: number;
+    function tick() {
+      const elapsed = (Date.now() - startMs) / 1000;
+      raceElapsedRef.current = Math.min(elapsed, raceDuration);
+      raf = requestAnimationFrame(tick);
+    }
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [phase, raceStartsAt, raceDuration]);
+
+  // Live closed-phase countdown — derived from bettingClosesAt + closedDuration
+  // rather than the polling-based timeRemaining, which can stall at 0 for
+  // several seconds if the server cron is delayed on the closed→racing flip.
+  const closedRemainingRef = useRef(closedDuration ?? 0);
+  useEffect(() => {
+    if (phase !== "closed" || !bettingClosesAt || !closedDuration) {
+      closedRemainingRef.current = closedDuration ?? 0;
+      return;
+    }
+    const endMs = new Date(bettingClosesAt).getTime() + closedDuration * 1000;
+    let raf: number;
+    function tick() {
+      const remaining = Math.max(0, (endMs - Date.now()) / 1000);
+      closedRemainingRef.current = remaining;
+      raf = requestAnimationFrame(tick);
+    }
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [phase, bettingClosesAt, closedDuration]);
+
   const getTargetProgress = useCallback((horseId: number): number => {
-    if (!checkpoints) return 3;
+    // Horses sit at the starting line (pos 0) before we have checkpoints —
+    // matches checkpoint[0] so there's no snap when racing begins.
+    if (!checkpoints) return 0;
     const cp = checkpoints.find(c => c.horseId === horseId);
-    if (!cp) return 3;
+    if (!cp) return 0;
     if (phase === "results") return cp.positions[cp.positions.length - 1];
 
-    const elapsed = raceDuration - timeRemaining;
+    // Use the real elapsed time from raceStartsAt (updated every frame)
+    // instead of the polling-based timeRemaining which can be stale/zero.
+    const elapsed = raceStartsAt
+      ? raceElapsedRef.current
+      : raceDuration - timeRemaining;
     const t = Math.min(1, elapsed / raceDuration);
     const n = cp.positions.length;
     const f = t * (n - 1);
@@ -114,7 +164,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
     const frac = f - i;
     if (i >= n - 1) return cp.positions[n - 1];
     return cp.positions[i] + (cp.positions[i + 1] - cp.positions[i]) * frac;
-  }, [checkpoints, phase, timeRemaining, raceDuration]);
+  }, [checkpoints, phase, timeRemaining, raceDuration, raceStartsAt]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -472,6 +522,13 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
 
       // ===== GATES COUNTDOWN OVERLAY =====
       if (isClosed) {
+        // Use the live per-frame countdown so the number never stalls at 0
+        // while waiting for the server cron to flip state to "racing".
+        const liveRemaining = bettingClosesAt && closedDuration
+          ? closedRemainingRef.current
+          : timeRemaining;
+        const shownSeconds = Math.max(0, Math.ceil(liveRemaining));
+
         // Semi-transparent dark scrim
         ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
         ctx.fillRect(0, 0, W, H);
@@ -484,7 +541,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        if (timeRemaining <= 3) {
+        if (shownSeconds <= 3) {
           ctx.shadowColor = "rgba(245, 158, 11, 0.7)";
           ctx.shadowBlur = 48;
           ctx.fillStyle = "#F59E0B";
@@ -493,7 +550,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
           ctx.shadowBlur = 32;
           ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
         }
-        ctx.fillText(String(timeRemaining), W / 2, H * 0.42);
+        ctx.fillText(String(shownSeconds), W / 2, H * 0.42);
         ctx.restore();
 
         // Label — uppercase, wide-tracked, muted
@@ -504,7 +561,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         // Manual letter-spacing by drawing chars individually
-        const label = timeRemaining <= 3 ? "STARTING" : "GATES LOADING";
+        const label = shownSeconds <= 3 ? "STARTING" : "GATES LOADING";
         const spacing = labelSize * 0.28;
         const charWidths = Array.from(label).map(c => ctx.measureText(c).width);
         const totalW = charWidths.reduce((a, b) => a + b, 0) + spacing * (label.length - 1);
@@ -523,12 +580,12 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
 
         // Everything scales from UI_SCALE so the panel stays legible at
         // streamer canvas sizes without overwhelming mobile.
-        const panelPadX = Math.round(12 * UI_SCALE);
+        const panelPadX = Math.round(10 * UI_SCALE);
         const panelPadY = Math.round(10 * UI_SCALE);
         const rowH = Math.round(18 * UI_SCALE);
-        const panelW = Math.round(140 * UI_SCALE);
+        const panelW = Math.round(116 * UI_SCALE);
         const panelH = leaderboard.length * rowH + panelPadY * 2;
-        const panelX = W - panelW - Math.round(12 * UI_SCALE);
+        const panelX = W - panelW - Math.round(6 * UI_SCALE);
         const panelY = Math.round(12 * UI_SCALE);
         const numFont = Math.round(11 * UI_SCALE);
         const nameFont = Math.round(11 * UI_SCALE);
@@ -617,7 +674,7 @@ export function RaceCanvas({ entries, checkpoints, phase, timeRemaining, raceDur
 
     draw();
     return () => cancelAnimationFrame(animRef.current);
-  }, [canvasSize, entries, phase, timeRemaining, raceDuration, ground, getTargetProgress]);
+  }, [canvasSize, entries, phase, timeRemaining, raceDuration, ground, getTargetProgress, bettingClosesAt, closedDuration]);
 
   return (
     <div

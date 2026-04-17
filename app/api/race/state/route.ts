@@ -145,6 +145,13 @@ export async function GET() {
       };
     });
 
+    // Compute raceStartsAt — the moment the race phase begins.
+    // If race_starts_at is set in DB (from runRace()), use that.
+    // Otherwise derive it from betting_closes_at + CLOSED_DURATION.
+    const raceStartsAt = current.race_starts_at
+      ? current.race_starts_at
+      : new Date(bettingClosesAt + RACE_TIMING.CLOSED_DURATION * 1000).toISOString();
+
     const state: RaceState = {
       currentRace: {
         id: current.id,
@@ -155,6 +162,7 @@ export async function GET() {
         serverSeedHash: current.server_seed_hash,
         bettingOpensAt: current.betting_opens_at,
         bettingClosesAt: current.betting_closes_at,
+        raceStartsAt,
         betCount: current.bet_count,
         totalVolume: parseFloat(current.total_bet_amount),
         entries: formattedEntries,

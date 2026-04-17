@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/race/tick",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/affiliate-tiers",
       "schedule": "0 3 * * *"
     },

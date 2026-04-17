@@ -11,6 +11,7 @@ import type { RaceState, RaceEntry, RacePhase, Horse } from "@/lib/racing/consta
 import { getHorseIdentity } from "@/lib/racing/constants";
 import { RaceWinCard } from "@/components/racing/RaceWinCard";
 import { HorseSprite } from "@/components/racing/HorseSprite";
+import { PodiumResults } from "@/components/racing/PodiumResults";
 import { BigWinCelebration } from "@/components/game/BigWinCelebration";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
@@ -21,12 +22,24 @@ import { track } from "@/lib/analytics/posthog";
 
 // ======= TIMESTAMP-BASED COUNTDOWN (no jitter) =======
 
-function calcRacePhase(status: string, bettingClosesAt: string): { phase: RacePhase; timeRemaining: number } {
+function calcRacePhase(status: string, bettingClosesAt: string, raceStartsAt?: string): { phase: RacePhase; timeRemaining: number } {
   const now = Date.now();
   const closes = new Date(bettingClosesAt).getTime();
   const closedEnd = closes + RACE_TIMING.CLOSED_DURATION * 1000;
-  const raceEnd = closedEnd + RACE_TIMING.RACE_DURATION * 1000;
+
+  // If we have raceStartsAt (set by the server when the race actually starts running),
+  // use that for race/results timing. This avoids the bug where the cron is delayed
+  // and the client calculates timeRemaining=0 from the derived timestamp.
+  const raceStart = raceStartsAt ? new Date(raceStartsAt).getTime() : closedEnd;
+  const raceEnd = raceStart + RACE_TIMING.RACE_DURATION * 1000;
   const resultsEnd = raceEnd + RACE_TIMING.RESULTS_DURATION * 1000;
+
+  // Optimistic phase advancement — if the wall clock has moved past a boundary
+  // but the server tick hasn't yet updated `status`, advance the phase client
+  // side so the UI never stalls at "0 seconds" waiting for the cron to catch up.
+  if (status === "betting" && now >= closes) status = "closed";
+  if (status === "closed" && now >= closedEnd) status = "racing";
+  if (status === "racing" && now >= raceEnd) status = "settled";
 
   if (status === "betting") return { phase: "betting", timeRemaining: Math.max(0, Math.ceil((closes - now) / 1000)) };
   if (status === "closed") return { phase: "closed", timeRemaining: Math.max(0, Math.ceil((closedEnd - now) / 1000)) };
@@ -91,7 +104,8 @@ export default function RacingPage() {
         if (raceChanged || statusChanged) {
           const { phase: p, timeRemaining: t } = calcRacePhase(
             state.currentRace.status,
-            state.currentRace.bettingClosesAt
+            state.currentRace.bettingClosesAt,
+            state.currentRace.raceStartsAt
           );
           setPhase(p);
           setTimeRemaining(t);
@@ -269,7 +283,8 @@ export default function RacingPage() {
       if (!raceState?.currentRace) return;
       const { phase: p, timeRemaining: t } = calcRacePhase(
         raceState.currentRace.status,
-        raceState.currentRace.bettingClosesAt
+        raceState.currentRace.bettingClosesAt,
+        raceState.currentRace.raceStartsAt
       );
       setPhase(p);
       setTimeRemaining(t);
@@ -387,13 +402,25 @@ export default function RacingPage() {
           timeRemaining={timeRemaining}
           raceDuration={RACE_TIMING.RACE_DURATION}
           ground={currentRace.ground}
+          raceStartsAt={currentRace.raceStartsAt}
+          bettingClosesAt={currentRace.bettingClosesAt}
+          closedDuration={RACE_TIMING.CLOSED_DURATION}
         />
       )}
 
-      {/* Race card — hidden during closed (canvas showing) and racing */}
+      {/* Podium — replaces the race card list during results */}
+      {isResults && (
+        <PodiumResults
+          entries={currentRace.entries}
+          raceId={currentRace.id}
+          raceNumber={currentRace.raceNumber}
+        />
+      )}
+
+      {/* Race card — hidden during closed (canvas showing), racing, and results */}
       <div className={cn(
         "rounded-2xl border border-white/[0.06] bg-gradient-to-b from-[#14141f] to-[#11111a] overflow-hidden",
-        (isRacing || phase === "closed") && "hidden"
+        (isRacing || phase === "closed" || isResults) && "hidden"
       )}>
         <div className="px-4 py-2.5 border-b border-white/[0.04] flex items-center justify-between">
           <span className="text-[10px] text-white/30 uppercase tracking-widest font-medium">

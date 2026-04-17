@@ -327,12 +327,28 @@ void HOUSE_EDGE;
 
 export async function settleRace(raceId: string) {
   // Get the winner
-  const { data: winner } = await db()
+  let { data: winner } = await db()
     .from("race_entries")
     .select("horse_id")
     .eq("race_id", raceId)
     .eq("finish_position", 1)
     .single();
+
+  // Self-heal: if status transitioned to "racing" but finish positions were
+  // never written (e.g. a deploy or crash interrupted runRace mid-flight),
+  // re-run the simulation so the tick can progress instead of looping on
+  // "No winner found" forever.
+  if (!winner) {
+    console.error(`Race ${raceId}: missing winner, re-running simulation to self-heal`);
+    await runRace(raceId);
+    const retry = await db()
+      .from("race_entries")
+      .select("horse_id")
+      .eq("race_id", raceId)
+      .eq("finish_position", 1)
+      .single();
+    winner = retry.data;
+  }
 
   if (!winner) throw new Error("No winner found");
 
