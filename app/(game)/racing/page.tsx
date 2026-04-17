@@ -327,8 +327,15 @@ export default function RacingPage() {
   if (!raceState) return <div className="flex items-center justify-center min-h-[50vh]"><p className="text-muted-foreground">Creating first race...</p></div>;
 
   const { currentRace, recentWinners } = raceState;
-  const isRacing = phase === "racing";
-  const isResults = phase === "results";
+  // A race only counts as "results" once the server has actually written
+  // finish positions. Until then we keep the racing UI visible — avoids
+  // showing a podium with placeholder data during the optimistic phase
+  // advancement gap (client thinks race is over, server hasn't settled yet).
+  const finishPositionsReady = currentRace.entries.some(
+    (e) => typeof e.finishPosition === "number"
+  );
+  const isResults = phase === "results" && finishPositionsReady;
+  const isRacing = phase === "racing" || (phase === "results" && !finishPositionsReady);
   const isBetting = phase === "betting";
 
   const sortedEntries = [...currentRace.entries].sort((a, b) => {
