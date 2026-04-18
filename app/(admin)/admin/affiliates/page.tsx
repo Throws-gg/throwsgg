@@ -746,19 +746,37 @@ function VanityLinksPanel({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const cleanUsername = newUsername.trim().replace(/^@+/, "");
 
   const handleCreate = async () => {
-    if (!newSlug || !newUsername || !userId) return;
-    setCreating(true);
     setError(null);
     setSuccess(null);
+    if (!userId) {
+      setError("Not signed in as admin");
+      return;
+    }
+    if (!newSlug) {
+      setError("Enter a slug (e.g. drake)");
+      return;
+    }
+    if (newSlug.length < 3) {
+      setError("Slug must be at least 3 characters");
+      return;
+    }
+    if (!cleanUsername) {
+      setError("Enter the affiliate's username");
+      return;
+    }
+    setCreating(true);
     try {
       const res = await fetch("/api/admin/affiliates/vanity", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           slug: newSlug,
-          username: newUsername,
+          username: cleanUsername,
           note: newNote || null,
           userId,
         }),
@@ -777,6 +795,16 @@ function VanityLinksPanel({
       setError("Network error");
     }
     setCreating(false);
+  };
+
+  const handleCopy = async (slug: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(`https://throws.gg/${slug}`);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      // clipboard may be blocked — silently ignore
+    }
   };
 
   const handleDeactivate = async (slugId: string) => {
@@ -833,9 +861,17 @@ function VanityLinksPanel({
               type="text"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreate();
+              }}
               placeholder="degen_a1b2c3"
               className="w-full px-3 py-2 rounded bg-white/[0.03] border border-white/[0.08] text-xs text-white placeholder-white/25 focus:outline-none focus:border-violet/50 font-mono"
             />
+            {newUsername && cleanUsername !== newUsername && (
+              <p className="text-[9px] text-white/30 font-mono mt-1">
+                looking up: <span className="text-violet/80">{cleanUsername}</span>
+              </p>
+            )}
           </div>
 
           <div>
@@ -852,16 +888,11 @@ function VanityLinksPanel({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handleCreate}
-            disabled={!newSlug || !newUsername || creating}
-            className={cn(
-              "px-5 py-2 text-xs font-mono font-bold uppercase tracking-wider rounded transition-all",
-              newSlug && newUsername
-                ? "bg-violet/15 border border-violet/40 text-violet hover:bg-violet/25"
-                : "bg-white/[0.03] border border-white/[0.06] text-white/30 cursor-not-allowed"
-            )}
+            disabled={creating}
+            className="px-5 py-2 text-xs font-mono font-bold uppercase tracking-wider rounded transition-all bg-violet/15 border border-violet/40 text-violet hover:bg-violet/25 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {creating ? "creating..." : "create link"}
           </button>
@@ -919,14 +950,22 @@ function VanityLinksPanel({
                     </span>
                   </Td>
                   <Td className="text-right pr-4">
-                    {s.active && (
+                    <div className="flex items-center gap-3 justify-end">
                       <button
-                        onClick={() => handleDeactivate(s.id)}
-                        className="text-[10px] font-mono uppercase tracking-wider text-red/70 hover:text-red"
+                        onClick={() => handleCopy(s.slug, s.id)}
+                        className="text-[10px] font-mono uppercase tracking-wider text-violet/70 hover:text-violet"
                       >
-                        deactivate
+                        {copiedId === s.id ? "copied" : "copy"}
                       </button>
-                    )}
+                      {s.active && (
+                        <button
+                          onClick={() => handleDeactivate(s.id)}
+                          className="text-[10px] font-mono uppercase tracking-wider text-red/70 hover:text-red"
+                        >
+                          deactivate
+                        </button>
+                      )}
+                    </div>
                   </Td>
                 </tr>
               ))}

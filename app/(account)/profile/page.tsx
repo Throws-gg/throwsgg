@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { cn } from "@/lib/utils";
 
 // ======= VIP TIER SYSTEM =======
@@ -193,7 +194,8 @@ function VipProgress({ totalWagered }: { totalWagered: number }) {
 // ======= MAIN PAGE =======
 
 export default function ProfilePage() {
-  const { userId, username, totalWagered, totalProfit, balance } = useUserStore();
+  const { username, totalWagered, totalProfit, balance } = useUserStore();
+  const [editingUsername, setEditingUsername] = useState(false);
 
   // Stats that need API data show "—" until we wire them up.
   // Better to show honest zeros than fake numbers that destroy trust.
@@ -240,6 +242,16 @@ export default function ProfilePage() {
                 <h1 className="text-xl sm:text-2xl font-black text-white truncate">
                   {username || "anon"}
                 </h1>
+                <button
+                  onClick={() => setEditingUsername(true)}
+                  aria-label="Edit username"
+                  className="text-white/30 hover:text-violet transition-colors p-1 -m-1"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                </button>
                 <TierBadge tier={currentTier} size="sm" />
               </div>
               <div className="flex items-center gap-3 text-[11px] text-white/25">
@@ -366,6 +378,122 @@ export default function ProfilePage() {
           </div>
         </motion.div>
       </div>
+
+      {editingUsername && (
+        <UsernameEditModal
+          current={username || ""}
+          onClose={() => setEditingUsername(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ======= USERNAME EDIT MODAL =======
+
+function UsernameEditModal({ current, onClose }: { current: string; onClose: () => void }) {
+  const setUsernameInStore = useUserStore((s) => s.setUsername);
+  const authedFetch = useAuthedFetch();
+  const [value, setValue] = useState(current);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const clean = value.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const valid = /^[a-z0-9_]{3,20}$/.test(clean);
+  const changed = clean !== current;
+
+  const submit = async () => {
+    if (!valid || !changed || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await authedFetch("/api/user/username", {
+        method: "POST",
+        body: JSON.stringify({ username: clean }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to update");
+        setSubmitting(false);
+        return;
+      }
+      setUsernameInStore(data.username);
+      onClose();
+    } catch {
+      setError("Network error");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+    >
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+      <motion.div
+        initial={{ y: 16, scale: 0.98, opacity: 0 }}
+        animate={{ y: 0, scale: 1, opacity: 1 }}
+        className="relative z-10 w-full max-w-sm rounded-xl border border-white/10 bg-[#0a0a12] p-6 space-y-4"
+      >
+        <div>
+          <p className="text-[10px] font-mono text-white/30 uppercase tracking-[0.25em] mb-1">
+            edit username
+          </p>
+          <h2 className="text-lg font-black text-white">pick a new handle</h2>
+          <p className="text-[11px] text-white/40 mt-1">
+            3-20 chars, lowercase letters, numbers, or underscores. You can change this once every 7 days.
+          </p>
+        </div>
+
+        <div>
+          <input
+            autoFocus
+            type="text"
+            value={value}
+            onChange={(e) => {
+              setError(null);
+              setValue(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              if (e.key === "Escape") onClose();
+            }}
+            placeholder="new_username"
+            className="w-full px-3 py-2.5 rounded bg-white/[0.03] border border-white/[0.08] text-sm text-white placeholder-white/25 focus:outline-none focus:border-violet/50 font-mono"
+          />
+          {value && clean !== value && (
+            <p className="text-[10px] text-white/40 mt-1.5 font-mono">
+              will be saved as: <span className="text-violet">{clean || "(empty)"}</span>
+            </p>
+          )}
+          {error && (
+            <p className="text-[11px] text-red font-mono mt-1.5">{error}</p>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 rounded bg-white/[0.04] border border-white/10 text-white/60 text-xs font-mono font-bold uppercase tracking-wider hover:bg-white/[0.08]"
+          >
+            cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!valid || !changed || submitting}
+            className={cn(
+              "flex-1 px-4 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-all",
+              valid && changed && !submitting
+                ? "bg-violet/15 border border-violet/40 text-violet hover:bg-violet/25"
+                : "bg-white/[0.03] border border-white/[0.06] text-white/30 cursor-not-allowed"
+            )}
+          >
+            {submitting ? "saving..." : "save"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

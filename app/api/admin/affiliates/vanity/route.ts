@@ -88,14 +88,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `"${slug}" is reserved` }, { status: 400 });
     }
 
-    // Look up the target user
+    // Look up the target user — tolerant of @prefix, whitespace, casing.
+    const normalisedUsername = String(targetUsername).trim().replace(/^@+/, "");
+    if (!normalisedUsername) {
+      return NextResponse.json({ error: "username required" }, { status: 400 });
+    }
     const { data: targetUser } = await supabase
       .from("users")
-      .select("id")
-      .eq("username", targetUsername)
-      .single();
+      .select("id, username")
+      .ilike("username", normalisedUsername)
+      .maybeSingle();
     if (!targetUser) {
-      return NextResponse.json({ error: `User "${targetUsername}" not found` }, { status: 404 });
+      return NextResponse.json({ error: `User "${normalisedUsername}" not found` }, { status: 404 });
     }
 
     // Check slug isn't already taken

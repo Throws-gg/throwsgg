@@ -45,6 +45,7 @@ interface UserStore {
     referralCode?: string | null;
   }) => void;
   setBalance: (balance: number) => void;
+  setUsername: (username: string) => void;
   setBonusState: (state: {
     cashBalance?: number;
     bonusBalance?: number;
@@ -88,6 +89,8 @@ export const useUserStore = create<UserStore>((set) => ({
     }),
 
   setBalance: (balance) => set({ balance }),
+
+  setUsername: (username) => set({ username }),
 
   setBonusState: (s) =>
     set((state) => ({
