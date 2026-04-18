@@ -205,12 +205,18 @@ export default function RacingPage() {
               }
             }
 
-            // Refresh balance for the authenticated user
+            // Refresh balance + bonus state for the authenticated user
             if (userId) {
               authedFetch("/api/user/me")
                 .then(r => r.json())
                 .then(d => {
-                  if (d.user) useUserStore.getState().setBalance(d.user.balance);
+                  if (d.user) {
+                    useUserStore.getState().setBonusState({
+                      cashBalance: d.user.balance,
+                      bonusBalance: d.user.bonusBalance,
+                      wageringRemaining: d.user.wageringRemaining,
+                    });
+                  }
                 })
                 .catch(() => {});
             }
@@ -1016,9 +1022,8 @@ function HorseBetCard({
             <div className="flex gap-1.5">
               {CHIPS.map((chip) => {
                 const totalFunds = balance + bonusBalance;
-                const bonusActive = bonusBalance > 0 || wageringRemaining > 0;
                 const maxAllowed = Math.min(
-                  bonusActive ? 5 : BANKROLL_RACING.MAX_BET, // $5 max while bonus active
+                  BANKROLL_RACING.MAX_BET,
                   totalFunds,
                   ...(maxLiabilityBet !== null ? [maxLiabilityBet] : [])
                 );

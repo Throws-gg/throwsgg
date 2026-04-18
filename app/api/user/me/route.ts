@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("users")
-    .select("id, username, balance, total_wagered, total_profit")
+    .select("id, username, balance, bonus_balance, wagering_remaining, bonus_expires_at, total_wagered, total_profit")
     .eq("id", user.dbUserId)
     .single();
 
@@ -29,6 +29,9 @@ export async function GET(request: NextRequest) {
       id: data.id,
       username: data.username,
       balance: parseFloat(data.balance),
+      bonusBalance: parseFloat(data.bonus_balance || 0),
+      wageringRemaining: parseFloat(data.wagering_remaining || 0),
+      bonusExpiresAt: data.bonus_expires_at,
       totalWagered: parseFloat(data.total_wagered),
       totalProfit: parseFloat(data.total_profit),
     },
