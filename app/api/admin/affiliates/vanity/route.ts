@@ -1,37 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyAdmin } from "@/lib/auth/verify-admin";
 
 /**
- * GET /api/admin/affiliates/vanity
- * List all vanity slugs.
+ * GET    /api/admin/affiliates/vanity       — list all vanity slugs
+ * POST   /api/admin/affiliates/vanity       — create a new vanity slug
+ *         Body: { slug, username, note? }
+ * DELETE /api/admin/affiliates/vanity       — deactivate a slug
+ *         Body: { slugId }
  *
- * POST /api/admin/affiliates/vanity
- * Create a new vanity slug.
- * Body: { slug: string, username: string, note?: string, userId?: string (admin) }
- *
- * DELETE /api/admin/affiliates/vanity
- * Deactivate a vanity slug.
- * Body: { slugId: string, userId?: string (admin) }
+ * Auth: admin password cookie (see verifyAdmin + middleware).
  */
 
 export async function GET(request: NextRequest) {
+  const admin = await verifyAdmin(request);
+  if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const supabase = createAdminClient();
-  const { searchParams } = new URL(request.url);
-
-  // Basic admin check (userId required, must be admin)
-  const adminId = searchParams.get("userId");
-  if (!adminId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const { data: admin } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", adminId)
-    .single();
-  if (!admin || admin.role !== "admin") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
-
   const { data: slugs } = await supabase
     .from("vanity_slugs")
     .select("*, users!vanity_slugs_user_id_fkey(username, referral_code)")
@@ -53,28 +38,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const body = await request.json().catch(() => ({}));
+  const admin = await verifyAdmin(request, body);
+  if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const supabase = createAdminClient();
 
   try {
-    const body = await request.json();
-    const { slug: rawSlug, username: targetUsername, note, userId: adminId } = body;
+    const { slug: rawSlug, username: targetUsername, note } = body;
 
-    if (!adminId || !rawSlug || !targetUsername) {
-      return NextResponse.json({ error: "slug, username, and userId required" }, { status: 400 });
-    }
-
-    // Admin check
-    const { data: admin } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", adminId)
-      .single();
-    if (!admin || admin.role !== "admin") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    if (!rawSlug || !targetUsername) {
+      return NextResponse.json({ error: "slug and username required" }, { status: 400 });
     }
 
     // Validate slug format
-    const slug = rawSlug.toLowerCase().trim().replace(/\s+/g, "-");
+    const slug = String(rawSlug).toLowerCase().trim().replace(/\s+/g, "-");
     if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(slug)) {
       return NextResponse.json(
         { error: "Slug must be 3-32 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphens" },
@@ -112,13 +90,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Slug "${slug}" is already taken` }, { status: 409 });
     }
 
-    // Create the vanity slug
     const { data: created, error } = await supabase
       .from("vanity_slugs")
       .insert({
         slug,
         user_id: targetUser.id,
-        created_by: adminId,
+        created_by: null,
         note: note || null,
       })
       .select()
@@ -145,24 +122,16 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const body = await request.json().catch(() => ({}));
+  const admin = await verifyAdmin(request, body);
+  if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const supabase = createAdminClient();
 
   try {
-    const body = await request.json();
-    const { slugId, userId: adminId } = body;
-
-    if (!adminId || !slugId) {
-      return NextResponse.json({ error: "slugId and userId required" }, { status: 400 });
-    }
-
-    // Admin check
-    const { data: admin } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", adminId)
-      .single();
-    if (!admin || admin.role !== "admin") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    const { slugId } = body;
+    if (!slugId) {
+      return NextResponse.json({ error: "slugId required" }, { status: 400 });
     }
 
     const { error } = await supabase
@@ -170,10 +139,7 @@ export async function DELETE(request: NextRequest) {
       .update({ active: false })
       .eq("id", slugId);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Vanity slug delete error:", err);

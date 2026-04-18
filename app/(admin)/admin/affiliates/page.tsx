@@ -97,7 +97,7 @@ export default function AdminAffiliatesPage() {
       if (userId) params.set("userId", userId);
       const [appRes, vanityRes] = await Promise.all([
         fetch(`/api/admin/affiliates/list?${params}`),
-        fetch(`/api/admin/affiliates/vanity?userId=${userId || ""}`),
+        fetch(`/api/admin/affiliates/vanity`),
       ]);
       if (appRes.ok) {
         const data = await appRes.json();
@@ -352,7 +352,6 @@ export default function AdminAffiliatesPage() {
       {tab === "vanity" && (
         <VanityLinksPanel
           slugs={vanitySlugs}
-          userId={userId}
           onRefresh={fetchData}
         />
       )}
@@ -733,11 +732,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function VanityLinksPanel({
   slugs,
-  userId,
   onRefresh,
 }: {
   slugs: VanitySlug[];
-  userId: string | null;
   onRefresh: () => void;
 }) {
   const [newSlug, setNewSlug] = useState("");
@@ -753,10 +750,6 @@ function VanityLinksPanel({
   const handleCreate = async () => {
     setError(null);
     setSuccess(null);
-    if (!userId) {
-      setError("Not signed in as admin");
-      return;
-    }
     if (!newSlug) {
       setError("Enter a slug (e.g. drake)");
       return;
@@ -778,7 +771,6 @@ function VanityLinksPanel({
           slug: newSlug,
           username: cleanUsername,
           note: newNote || null,
-          userId,
         }),
       });
       const data = await res.json();
@@ -808,12 +800,11 @@ function VanityLinksPanel({
   };
 
   const handleDeactivate = async (slugId: string) => {
-    if (!userId) return;
     try {
       await fetch("/api/admin/affiliates/vanity", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slugId, userId }),
+        body: JSON.stringify({ slugId }),
       });
       onRefresh();
     } catch {
