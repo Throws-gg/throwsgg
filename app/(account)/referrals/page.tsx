@@ -44,17 +44,19 @@ interface PeriodEntry {
 
 interface ReferralsData {
   referralCode: string;
-  affiliate: AffiliateInfo;
+  isAffiliate: boolean;
+  referralRate: number | null;
+  affiliate: AffiliateInfo | null;
   stats: {
     totalReferrals: number;
     activatedReferrals: number;
     claimable: number;
-    heldInPeriods: number;
-    unrolledPending: number;
+    heldInPeriods?: number;
+    unrolledPending?: number;
     lifetime: number;
   };
   referrals: ReferralEntry[];
-  periods: PeriodEntry[];
+  periods?: PeriodEntry[];
 }
 
 // ======= HELPERS =======
@@ -75,26 +77,34 @@ function formatDate(dateStr: string): string {
 
 export default function ReferralsPage() {
   const userId = useUserStore((s) => s.userId);
+  const username = useUserStore((s) => s.username);
   const setBalance = useUserStore((s) => s.setBalance);
   const authedFetch = useAuthedFetch();
 
   const [data, setData] = useState<ReferralsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimResult, setClaimResult] = useState<{ amount: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const fetchData = useCallback(async () => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
+    // Wait for the user store to hydrate. If the user is actually signed out,
+    // PrivyAuthBridge will leave username/userId null forever — but the navbar
+    // shows "sign in" then, and this page isn't reachable through nav anyway.
+    if (!userId) return;
+
+    setFetchError(null);
     try {
       const res = await authedFetch(`/api/referrals/me?userId=${userId}`);
       const json = await res.json();
-      if (res.ok) setData(json);
+      if (res.ok) {
+        setData(json);
+      } else {
+        setFetchError(json.error || "Failed to load referrals");
+      }
     } catch {
-      // silent
+      setFetchError("Network error");
     }
     setLoading(false);
   }, [userId, authedFetch]);
@@ -153,15 +163,8 @@ export default function ReferralsPage() {
     setClaiming(false);
   }, [userId, claiming, data, setBalance, fetchData]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="w-5 h-5 border-2 border-violet/40 border-t-violet rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!userId || !data) {
+  // Truly signed out: both userId and username are null.
+  if (!userId && !username) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <p className="text-muted-foreground text-sm">Sign in to view your referrals</p>
@@ -169,16 +172,35 @@ export default function ReferralsPage() {
     );
   }
 
-  const { affiliate, stats, referrals, periods } = data;
+  // Signed in but still hydrating store or fetching data.
+  if (loading || !data) {
+    if (fetchError) {
+      return (
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <p className="text-red/80 text-sm font-mono">{fetchError}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="w-5 h-5 border-2 border-violet/40 border-t-violet rounded-full animate-spin" />
+      </div>
+    );
+  }
 
-  // Progress to next tier
-  const tierProgress = affiliate.nextTierFloor
-    ? Math.min(
-        1,
-        (affiliate.rolling30dNgr - affiliate.tierFloor) /
-          (affiliate.nextTierFloor - affiliate.tierFloor)
-      )
-    : 1;
+  const { affiliate, stats, referrals } = data;
+  const periods = data.periods || [];
+  const displayRate = affiliate?.rate ?? data.referralRate ?? 0.20;
+
+  // Progress to next tier (affiliates only)
+  const tierProgress =
+    affiliate && affiliate.nextTierFloor
+      ? Math.min(
+          1,
+          (affiliate.rolling30dNgr - affiliate.tierFloor) /
+            (affiliate.nextTierFloor - affiliate.tierFloor)
+        )
+      : 1;
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] pb-20 md:pb-8">
@@ -202,7 +224,7 @@ export default function ReferralsPage() {
               <p className="text-sm text-white/35">
                 Share your link. Earn{" "}
                 <span className="text-green font-bold">
-                  {(affiliate.rate * 100).toFixed(0)}% of the NGR
+                  {(displayRate * 100).toFixed(0)}% of the NGR
                 </span>{" "}
                 on every bet your referrals make. Forever.
               </p>
@@ -258,66 +280,68 @@ export default function ReferralsPage() {
           </div>
         </motion.div>
 
-        {/* ===== TIER BADGE + PROGRESS ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-          className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-5 space-y-3"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
-                Your Tier
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xl font-black text-white">
-                  {affiliate.tierName}
-                </span>
-                <span className="text-[10px] bg-violet/15 border border-violet/30 text-violet font-bold px-2 py-0.5 rounded-full">
-                  {(affiliate.rate * 100).toFixed(0)}%
-                </span>
+        {/* ===== TIER BADGE + PROGRESS (affiliates only) ===== */}
+        {affiliate && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+                  Your Tier
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xl font-black text-white">
+                    {affiliate.tierName}
+                  </span>
+                  <span className="text-[10px] bg-violet/15 border border-violet/30 text-violet font-bold px-2 py-0.5 rounded-full">
+                    {(affiliate.rate * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+                  30-day NGR
+                </p>
+                <p className="text-xl font-black font-mono text-white tabular-nums mt-1">
+                  {formatCurrency(affiliate.rolling30dNgr)}
+                </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
-                30-day NGR
-              </p>
-              <p className="text-xl font-black font-mono text-white tabular-nums mt-1">
-                {formatCurrency(affiliate.rolling30dNgr)}
-              </p>
-            </div>
-          </div>
 
-          {/* Progress to next tier */}
-          {affiliate.nextTier !== null && affiliate.nextTierFloor !== null && (
-            <div className="space-y-1.5">
-              <div className="relative h-2 rounded-full bg-white/[0.04] overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${tierProgress * 100}%` }}
-                  transition={{ duration: 1, ease: "easeOut" }}
-                  className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet to-magenta shadow-[0_0_8px_rgba(139,92,246,0.4)]"
-                />
+            {/* Progress to next tier */}
+            {affiliate.nextTier !== null && affiliate.nextTierFloor !== null && (
+              <div className="space-y-1.5">
+                <div className="relative h-2 rounded-full bg-white/[0.04] overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${tierProgress * 100}%` }}
+                    transition={{ duration: 1, ease: "easeOut" }}
+                    className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet to-magenta shadow-[0_0_8px_rgba(139,92,246,0.4)]"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-white/30">Now: {affiliate.tierName}</span>
+                  <span className="text-white/25">
+                    {formatCurrency(
+                      Math.max(0, affiliate.nextTierFloor - affiliate.rolling30dNgr)
+                    )}{" "}
+                    to {affiliate.nextTierName}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-white/30">Now: {affiliate.tierName}</span>
-                <span className="text-white/25">
-                  {formatCurrency(
-                    Math.max(0, affiliate.nextTierFloor - affiliate.rolling30dNgr)
-                  )}{" "}
-                  to {affiliate.nextTierName}
-                </span>
-              </div>
-            </div>
-          )}
+            )}
 
-          {affiliate.nextTier === null && (
-            <p className="text-[11px] text-center text-gold font-semibold">
-              You&apos;ve hit the top tier.
-            </p>
-          )}
-        </motion.div>
+            {affiliate.nextTier === null && (
+              <p className="text-[11px] text-center text-gold font-semibold">
+                You&apos;ve hit the top tier.
+              </p>
+            )}
+          </motion.div>
+        )}
 
         {/* ===== STATS ===== */}
         <motion.div
@@ -352,8 +376,8 @@ export default function ReferralsPage() {
           </div>
         </motion.div>
 
-        {/* ===== HOLD BREAKDOWN ===== */}
-        {(stats.heldInPeriods > 0 || stats.unrolledPending > 0) && (
+        {/* ===== HOLD BREAKDOWN (affiliates only) ===== */}
+        {affiliate && ((stats.heldInPeriods ?? 0) > 0 || (stats.unrolledPending ?? 0) > 0) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -366,12 +390,12 @@ export default function ReferralsPage() {
             <div className="flex items-center justify-between text-white/50">
               <span>Not yet rolled up</span>
               <span className="font-mono">
-                ${stats.unrolledPending.toFixed(2)}
+                ${(stats.unrolledPending ?? 0).toFixed(2)}
               </span>
             </div>
             <div className="flex items-center justify-between text-white/50">
               <span>In 7-day hold</span>
-              <span className="font-mono">${stats.heldInPeriods.toFixed(2)}</span>
+              <span className="font-mono">${(stats.heldInPeriods ?? 0).toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between pt-1.5 border-t border-white/[0.04] text-gold font-semibold">
               <span>Ready to claim</span>
@@ -481,70 +505,72 @@ export default function ReferralsPage() {
           </div>
         </motion.div>
 
-        {/* ===== TIER TABLE ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.3 }}
-          className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] overflow-hidden"
-        >
-          <div className="px-5 py-3 border-b border-white/[0.04]">
-            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
-              Tier Structure
-            </p>
-          </div>
-          <div className="divide-y divide-white/[0.04]">
-            {[
-              { tier: 1, name: "Rookie", rate: 35, threshold: "$0 – $25k" },
-              { tier: 2, name: "Trainer", rate: 40, threshold: "$25k – $100k" },
-              { tier: 3, name: "Owner", rate: 45, threshold: "$100k+" },
-            ].map((t) => (
-              <div
-                key={t.tier}
-                className={cn(
-                  "flex items-center justify-between px-5 py-3",
-                  affiliate.tier === t.tier && "bg-violet/[0.05]"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <span
-                    className={cn(
-                      "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black",
-                      affiliate.tier === t.tier
-                        ? "bg-violet text-white"
-                        : affiliate.tier > t.tier
-                          ? "bg-green/15 text-green"
-                          : "bg-white/[0.04] text-white/30"
-                    )}
-                  >
-                    {affiliate.tier > t.tier ? "✓" : t.tier}
-                  </span>
-                  <span
-                    className={cn(
-                      "text-sm font-bold",
-                      affiliate.tier === t.tier ? "text-white" : "text-white/50"
-                    )}
-                  >
-                    {t.name}
-                  </span>
+        {/* ===== TIER TABLE (affiliates only) ===== */}
+        {affiliate && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.3 }}
+            className="rounded-xl border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-white/[0.01] overflow-hidden"
+          >
+            <div className="px-5 py-3 border-b border-white/[0.04]">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+                Tier Structure
+              </p>
+            </div>
+            <div className="divide-y divide-white/[0.04]">
+              {[
+                { tier: 1, name: "Rookie", rate: 35, threshold: "$0 – $25k" },
+                { tier: 2, name: "Trainer", rate: 40, threshold: "$25k – $100k" },
+                { tier: 3, name: "Owner", rate: 45, threshold: "$100k+" },
+              ].map((t) => (
+                <div
+                  key={t.tier}
+                  className={cn(
+                    "flex items-center justify-between px-5 py-3",
+                    affiliate.tier === t.tier && "bg-violet/[0.05]"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black",
+                        affiliate.tier === t.tier
+                          ? "bg-violet text-white"
+                          : affiliate.tier > t.tier
+                            ? "bg-green/15 text-green"
+                            : "bg-white/[0.04] text-white/30"
+                      )}
+                    >
+                      {affiliate.tier > t.tier ? "✓" : t.tier}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm font-bold",
+                        affiliate.tier === t.tier ? "text-white" : "text-white/50"
+                      )}
+                    >
+                      {t.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-white/35 font-mono">
+                      {t.threshold}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm font-black font-mono w-10 text-right",
+                        affiliate.tier === t.tier ? "text-violet" : "text-white/40"
+                      )}
+                    >
+                      {t.rate}%
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[11px] text-white/35 font-mono">
-                    {t.threshold}
-                  </span>
-                  <span
-                    className={cn(
-                      "text-sm font-black font-mono w-10 text-right",
-                      affiliate.tier === t.tier ? "text-violet" : "text-white/40"
-                    )}
-                  >
-                    {t.rate}%
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* ===== RECENT PERIODS ===== */}
         {periods.length > 0 && (

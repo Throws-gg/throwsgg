@@ -7,8 +7,7 @@ const TIER_RATES = [0.35, 0.40, 0.45];
 const TIER_THRESHOLDS = [0, 25_000, 100_000];
 const TIER_MAX = [25_000, 100_000, Infinity];
 
-const REFERRAL_RATE = 0.10; // 10% of NGR for regular referrals
-const REFERRAL_WINDOW_DAYS = 90;
+const REFERRAL_RATE = 0.20; // 20% of NGR for regular referrals, lifetime
 
 function tierName(tier: number) {
   return TIER_NAMES[Math.max(0, Math.min(2, tier - 1))];
@@ -23,7 +22,7 @@ function tierRate(tier: number) {
  * Returns referral/affiliate data depending on the user's status:
  *
  * REGULAR REFERRER (is_affiliate = false):
- *   - referralCode, rate (10%), window (90 days)
+ *   - referralCode, rate (20% NGR, lifetime)
  *   - stats (claimable, lifetime, total/active referrals)
  *   - referrals list with per-user earnings
  *   - No tier system, no periods, no hold
@@ -96,22 +95,15 @@ export async function GET(request: NextRequest) {
     const referralsList = (referrals || []).map((r) => {
       const wagered = parseFloat(String(r.total_wagered));
 
-      // For regular referrals: show if within the 90-day window
-      const createdAt = new Date(r.created_at).getTime();
-      const windowExpires = createdAt + REFERRAL_WINDOW_DAYS * 24 * 3600 * 1000;
-      const windowActive = Date.now() < windowExpires;
-      const daysRemaining = Math.max(0, Math.ceil((windowExpires - Date.now()) / (24 * 3600 * 1000)));
-
-      let status: "pending" | "active" | "activated" | "expired";
+      let status: "pending" | "active" | "activated";
       if (isAffiliate) {
         // Affiliate: activation gate determines status
         if (r.referral_activated) status = "activated";
         else if (wagered > 0) status = "active";
         else status = "pending";
       } else {
-        // Regular referral: 90-day window
-        if (!windowActive) status = "expired";
-        else if (wagered > 0) status = "active";
+        // Regular referral: earns lifetime, no expiry
+        if (wagered > 0) status = "active";
         else status = "pending";
       }
 
@@ -122,7 +114,6 @@ export async function GET(request: NextRequest) {
         totalWagered: wagered,
         earnings: rewardsByReferred.get(r.id) || 0,
         status,
-        ...(isAffiliate ? {} : { daysRemaining, windowActive }),
       };
     });
 
@@ -218,7 +209,6 @@ export async function GET(request: NextRequest) {
 
       // Regular referral info (shown to everyone)
       referralRate: isAffiliate ? null : REFERRAL_RATE,
-      referralWindow: isAffiliate ? null : REFERRAL_WINDOW_DAYS,
 
       // Affiliate-only (null for regular referrers)
       affiliate: affiliateData,

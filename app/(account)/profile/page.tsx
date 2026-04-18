@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
@@ -194,7 +195,7 @@ function VipProgress({ totalWagered }: { totalWagered: number }) {
 // ======= MAIN PAGE =======
 
 export default function ProfilePage() {
-  const { username, totalWagered, totalProfit, balance } = useUserStore();
+  const { username, totalWagered, totalProfit, balance, referralCode } = useUserStore();
   const [editingUsername, setEditingUsername] = useState(false);
 
   // Stats that need API data show "—" until we wire them up.
@@ -280,6 +281,9 @@ export default function ProfilePage() {
 
         {/* ===== VIP PROGRESS ===== */}
         <VipProgress totalWagered={totalWagered} />
+
+        {/* ===== REFERRAL CARD ===== */}
+        {referralCode && <ReferralCard code={referralCode} />}
 
         {/* ===== STATS GRID ===== */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -386,6 +390,90 @@ export default function ProfilePage() {
         />
       )}
     </div>
+  );
+}
+
+// ======= REFERRAL CARD =======
+
+function ReferralCard({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const fullLink = `https://throws.gg/r/${code}`;
+  const displayLink = `throws.gg/r/${code}`;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(fullLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard blocked — silent
+    }
+  };
+
+  const handleShareX = () => {
+    const text = encodeURIComponent(
+      `16 AI horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullLink}`
+    );
+    window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.25 }}
+      className="relative overflow-hidden rounded-xl border border-violet/20 bg-gradient-to-br from-violet/[0.08] to-magenta/[0.04] p-5 space-y-4"
+    >
+      <div className="absolute top-0 right-0 w-48 h-48 rounded-full blur-[80px] -mr-16 -mt-16 bg-violet/15 pointer-events-none" />
+
+      <div className="relative space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+              Your Referral Link
+            </p>
+            <p className="text-sm text-white/70 mt-1">
+              Earn <span className="text-green font-bold">20% of NGR</span> for every friend you bring. Forever.
+            </p>
+          </div>
+          <Link
+            href="/referrals"
+            className="shrink-0 text-[10px] font-mono uppercase tracking-wider text-violet/80 hover:text-violet whitespace-nowrap"
+          >
+            details →
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex-1 bg-black/30 border border-white/[0.08] rounded-lg px-3 py-2.5 overflow-hidden">
+            <p className="font-mono text-xs sm:text-sm text-white/70 truncate select-all">
+              {displayLink}
+            </p>
+          </div>
+          <button
+            onClick={handleCopy}
+            className={cn(
+              "shrink-0 px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all active:scale-95",
+              copied
+                ? "bg-green/15 border border-green/30 text-green"
+                : "bg-violet text-white hover:bg-violet/80 shadow-[0_0_15px_rgba(139,92,246,0.3)]"
+            )}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <button
+          onClick={handleShareX}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/60 text-xs font-semibold hover:bg-white/[0.06] hover:text-white/80 active:scale-[0.99] transition-all"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+          Share on X
+        </button>
+      </div>
+    </motion.div>
   );
 }
 
