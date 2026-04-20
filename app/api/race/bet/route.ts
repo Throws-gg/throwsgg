@@ -68,29 +68,11 @@ export async function POST(request: NextRequest) {
         : parseFloat(entry.current_odds);
     const potentialPayout = amount * lockedOdds;
 
-    // Liability check — total potential payout on this horse shouldn't exceed max
+    // Per-horse liability cap is enforced atomically inside place_race_bet_atomic
+    // under a row lock on race_entries. Passing the cap in keeps the config in TS.
     const maxLiability = BANKROLL_RACING.INITIAL * BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO;
-    const { data: existingBets } = await supabase
-      .from("race_bets")
-      .select("potential_payout")
-      .eq("race_id", raceId)
-      .eq("horse_id", horseId)
-      .eq("status", "pending");
 
-    const currentLiability = (existingBets || []).reduce(
-      (sum, b) => sum + parseFloat(b.potential_payout), 0
-    );
-    const remainingLiability = maxLiability - currentLiability;
-
-    if (currentLiability + potentialPayout > maxLiability) {
-      const maxBetForLiability = remainingLiability / lockedOdds;
-      return NextResponse.json(
-        { error: "Liability limit reached for this horse", maxBet: Math.floor(maxBetForLiability * 100) / 100 },
-        { status: 400 }
-      );
-    }
-
-    // Atomic bet placement with bonus-aware balance handling
+    // Atomic bet placement with bonus-aware balance handling + liability cap.
     // Returns: { bet_id, cash_balance, bonus_balance, wagering_remaining,
     //            from_cash, from_bonus, bonus_converted, wagering_counted }
     const { data: result, error: betError } = await supabase.rpc(
@@ -103,17 +85,32 @@ export async function POST(request: NextRequest) {
         p_odds: lockedOdds,
         p_potential_payout: potentialPayout,
         p_bet_type: betType,
+        p_max_liability: maxLiability,
       }
     );
 
     if (betError) {
       const msg = betError.message || "Failed to place bet";
-      // Map known DB errors to clean HTTP responses
+      // LIABILITY_EXCEEDED:<cap>:<current_liability>
+      if (msg.includes("LIABILITY_EXCEEDED")) {
+        const parts = msg.split("LIABILITY_EXCEEDED:")[1]?.split(":") ?? [];
+        const cap = parseFloat(parts[0] ?? `${maxLiability}`);
+        const current = parseFloat(parts[1] ?? "0");
+        const remaining = Math.max(0, cap - current);
+        const maxBetForLiability = Math.floor((remaining / lockedOdds) * 100) / 100;
+        return NextResponse.json(
+          { error: "Liability limit reached for this horse", maxBet: maxBetForLiability },
+          { status: 400 }
+        );
+      }
       if (msg.includes("Insufficient balance")) {
         return NextResponse.json({ error: "Insufficient balance" }, { status: 400 });
       }
       if (msg.includes("Account is banned")) {
         return NextResponse.json({ error: "Account is banned" }, { status: 403 });
+      }
+      if (msg.includes("Horse not in this race")) {
+        return NextResponse.json({ error: "Horse not in this race" }, { status: 400 });
       }
       if (msg.includes("Max bet")) {
         return NextResponse.json({ error: msg.replace("ERROR:", "").trim() }, { status: 400 });

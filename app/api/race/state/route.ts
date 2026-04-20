@@ -151,6 +151,12 @@ export async function GET() {
       timeRemaining = Math.max(0, Math.ceil((resultsEndAt - now) / 1000));
     }
 
+    // Only expose trueProbability + powerScore AFTER the race is settled.
+    // During betting / closed / racing, these fields would let a bot compute
+    // positive-EV bets by comparing implied odds to the server's own probability
+    // model — effectively letting the attacker play against an inferior book.
+    const exposeHiddenFields = current.status === "settled";
+
     // Format entries
     const formattedEntries = (entries || []).map((e) => {
       const h = e.horses as unknown as Record<string, unknown>;
@@ -183,8 +189,8 @@ export async function GET() {
         currentOdds: parseFloat(e.current_odds),
         placeOdds: e.place_odds ? parseFloat(e.place_odds) : parseFloat(e.current_odds) * 0.5,
         showOdds: e.show_odds ? parseFloat(e.show_odds) : parseFloat(e.current_odds) * 0.3,
-        trueProbability: parseFloat(e.true_probability),
-        powerScore: e.power_score ? parseFloat(e.power_score) : undefined,
+        trueProbability: exposeHiddenFields ? parseFloat(e.true_probability) : undefined,
+        powerScore: exposeHiddenFields && e.power_score ? parseFloat(e.power_score) : undefined,
         finishPosition: e.finish_position || undefined,
         margin: e.margin ? parseFloat(e.margin) : undefined,
       };

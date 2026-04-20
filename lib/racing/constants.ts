@@ -61,7 +61,10 @@ export interface RaceEntry {
   currentOdds: number;
   placeOdds: number;
   showOdds: number;
-  trueProbability: number;
+  // trueProbability + powerScore are ONLY set on the server during settled
+  // races (post-reveal). They are stripped from the wire during betting/closed/racing
+  // to prevent a bettor from scanning for positive-EV horses before results exist.
+  trueProbability?: number;
   powerScore?: number;
   finishPosition?: number;
   margin?: number;
