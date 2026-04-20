@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tick } from "@/lib/game/engine";
+import { verifyCron } from "@/lib/cron/verify";
 
 /**
  * POST /api/game/tick
@@ -11,12 +12,7 @@ import { tick } from "@/lib/game/engine";
  * Protected by a shared secret to prevent abuse.
  */
 export async function POST(request: NextRequest) {
-  // Simple auth — check for cron secret or service key
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-
-  // Allow if: valid cron secret, or service role key, or no secret configured (dev mode)
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!verifyCron(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -26,10 +26,10 @@ interface SignupBonusResult {
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
-  // In dev mode, this route isn't used (dev toolbar creates users directly)
+  // In dev mode, this route isn't used (users are created via local tooling).
   if (isDevMode()) {
     return NextResponse.json(
-      { error: "Use /api/dev/user in dev mode" },
+      { error: "auth/sync disabled in dev mode" },
       { status: 400 }
     );
   }
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     referralCode?: string | null;
     fingerprint?: string | null;
     email?: string | null;
+    solanaAddress?: string | null;
   } = {};
   try {
     body = await request.json();
@@ -59,6 +60,10 @@ export async function POST(request: NextRequest) {
   const referralCode = body.referralCode || null;
   const fingerprint = body.fingerprint || null;
   const email = body.email || null;
+  const solanaAddress =
+    typeof body.solanaAddress === "string" && body.solanaAddress.length >= 32 && body.solanaAddress.length <= 44
+      ? body.solanaAddress
+      : null;
   const clientIp =
     request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
     request.headers.get("x-real-ip") ||
@@ -73,6 +78,17 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (existing) {
+      // Backfill wallet_address for users created before this column was populated.
+      // Write-once: never overwrite an existing address (prevents an attacker with a
+      // valid JWT from pointing their account at someone else's wallet).
+      if (!existing.wallet_address && solanaAddress) {
+        await supabase
+          .from("users")
+          .update({ wallet_address: solanaAddress })
+          .eq("id", existing.id)
+          .is("wallet_address", null);
+      }
+
       return NextResponse.json({
         user: {
           id: existing.id,
@@ -123,6 +139,7 @@ export async function POST(request: NextRequest) {
         role: "player",
         referral_code: newCode,
         referrer_id: referrerId,
+        wallet_address: solanaAddress,
       })
       .select()
       .single();

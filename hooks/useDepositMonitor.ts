@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useUserStore } from "@/stores/userStore";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 
 /**
  * Polls the deposit API every 15 seconds to detect new deposits.
@@ -9,6 +10,7 @@ import { useUserStore } from "@/stores/userStore";
  */
 export function useDepositMonitor(walletAddress: string | null) {
   const userId = useUserStore((s) => s.userId);
+  const authedFetch = useAuthedFetch();
   const [lastDeposit, setLastDeposit] = useState<{
     amount: number;
     timestamp: number;
@@ -21,10 +23,11 @@ export function useDepositMonitor(walletAddress: string | null) {
 
     setChecking(true);
     try {
-      const res = await fetch("/api/wallet/deposit", {
+      // userId + walletAddress are derived server-side from the authed Privy session.
+      // The walletAddress prop is kept for UI gating (only poll when we know a wallet exists).
+      const res = await authedFetch("/api/wallet/deposit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, walletAddress }),
+        body: JSON.stringify({}),
       });
 
       const data = await res.json();
@@ -41,7 +44,7 @@ export function useDepositMonitor(walletAddress: string | null) {
       // Silently retry next interval
     }
     setChecking(false);
-  }, [userId, walletAddress, checking]);
+  }, [userId, walletAddress, checking, authedFetch]);
 
   // Manual trigger
   const refresh = useCallback(() => {

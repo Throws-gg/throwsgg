@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getWalletBalances } from "@/lib/wallet/solana";
 import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
+import { verifyRequest } from "@/lib/auth/verify-request";
 
 /**
  * POST /api/wallet/deposit
@@ -12,10 +13,32 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
   try {
-    const { userId, walletAddress } = await request.json();
+    // Auth: derive userId from Privy JWT, never from body.
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch {
+      // Body is optional — deposit checks derive everything from the DB user record.
+    }
+    const authed = await verifyRequest(request, body);
+    if (!authed) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = authed.dbUserId;
 
-    if (!userId || !walletAddress) {
-      return NextResponse.json({ error: "userId and walletAddress required" }, { status: 400 });
+    // Wallet address comes from the DB user record, not the client body.
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("wallet_address")
+      .eq("id", userId)
+      .single();
+
+    const walletAddress = userRow?.wallet_address;
+    if (!walletAddress) {
+      return NextResponse.json(
+        { error: "No deposit wallet linked to this account" },
+        { status: 400 }
+      );
     }
 
     // Get current on-chain balances
@@ -163,17 +186,32 @@ export async function POST(request: NextRequest) {
  * Get current on-chain balances without crediting.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const walletAddress = searchParams.get("walletAddress");
+  const supabase = createAdminClient();
 
+  // Auth: caller can only query their own linked deposit wallet.
+  const authed = await verifyRequest(request);
+  if (!authed) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("wallet_address")
+    .eq("id", authed.dbUserId)
+    .single();
+
+  const walletAddress = userRow?.wallet_address;
   if (!walletAddress) {
-    return NextResponse.json({ error: "walletAddress required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "No deposit wallet linked to this account" },
+      { status: 400 }
+    );
   }
 
   try {
     const balances = await getWalletBalances(walletAddress);
     return NextResponse.json({ balances });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to fetch balances" }, { status: 500 });
   }
 }

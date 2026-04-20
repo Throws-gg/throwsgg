@@ -8,9 +8,8 @@
  *   ADMIN_PASSWORD       — the password admins enter at /admin/login
  *   ADMIN_SESSION_SALT   — random string, invalidates all sessions if changed
  *
- * Fallbacks for local dev (do NOT use in production):
- *   ADMIN_PASSWORD defaults to "admin"
- *   ADMIN_SESSION_SALT defaults to "throws-dev-salt"
+ * In production both vars are required — enforced by lib/env.ts boot check.
+ * In dev, long/obvious placeholders are used so it's clear if they leak into prod logs.
  *
  * Implementation note: this module uses the Web Crypto API (globalThis.crypto.subtle)
  * so it can run in both the Node.js runtime (API routes) AND the Edge Runtime
@@ -21,11 +20,21 @@ export const ADMIN_COOKIE_NAME = "throws_admin_session";
 export const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 8; // 8 hours
 
 function getPassword(): string {
-  return process.env.ADMIN_PASSWORD || "admin";
+  const pw = process.env.ADMIN_PASSWORD;
+  if (pw) return pw;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("ADMIN_PASSWORD is not set in production");
+  }
+  return "dev-only-admin-password-do-not-use-in-prod";
 }
 
 function getSalt(): string {
-  return process.env.ADMIN_SESSION_SALT || "throws-dev-salt";
+  const salt = process.env.ADMIN_SESSION_SALT;
+  if (salt) return salt;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("ADMIN_SESSION_SALT is not set in production");
+  }
+  return "dev-only-admin-session-salt-do-not-use-in-prod-32chars";
 }
 
 /**

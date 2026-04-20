@@ -39,9 +39,12 @@ export async function verifyAuthToken(
 
 /**
  * Dev mode fallback — if Privy isn't configured, accept userId from request body.
- * ONLY works when PRIVY_APP_SECRET is not set (dev mode).
+ * ONLY works when PRIVY_APP_SECRET is not set AND NODE_ENV !== "production".
+ * In production, a missing PRIVY_APP_SECRET throws at boot via lib/env.ts; this
+ * guard is defense-in-depth against env-loader bypass.
  */
 export function isDevMode(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
   const secret = process.env.PRIVY_APP_SECRET;
   return !secret || secret === "your_privy_app_secret";
 }

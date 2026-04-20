@@ -46,7 +46,12 @@ export async function verifyRequest(
     };
   }
 
-  // Dev mode fallback — trust userId from body
+  // Dev mode fallback — trust userId from body.
+  // Hard guard: never run this branch in production, even if isDevMode() is somehow true.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("verifyRequest: dev-mode branch reached in production");
+  }
+
   const userId = body?.userId as string;
   if (!userId) return null;
 

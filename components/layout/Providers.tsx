@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { useWallets } from "@privy-io/react-auth/solana";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/lib/auth/auth-context";
 import { useUserStore } from "@/stores/userStore";
@@ -16,6 +17,7 @@ const isConfigured = privyAppId && privyAppId !== "your_privy_app_id";
  */
 function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, login, logout: privyLogout, getAccessToken } = usePrivy();
+  const { wallets } = useWallets();
   const setUser = useUserStore((s) => s.setUser);
   const clearUser = useUserStore((s) => s.logout);
 
@@ -44,13 +46,21 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
       // Extract the user's email from Privy if available
       const email = user.email?.address || null;
 
+      // The Privy embedded Solana wallet — persisted server-side as the user's
+      // deposit address. Write-once on the server (see /api/auth/sync).
+      const solanaWallet = wallets.find(
+        (w) => (w as unknown as { walletClientType?: string }).walletClientType === "privy" ||
+               w.standardWallet?.name === "Privy"
+      ) || wallets[0];
+      const solanaAddress = solanaWallet?.address || null;
+
       const res = await fetch("/api/auth/sync", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ referralCode, fingerprint, email }),
+        body: JSON.stringify({ referralCode, fingerprint, email, solanaAddress }),
       });
 
       const data = await res.json();
@@ -115,7 +125,7 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("Auth sync failed:", err);
     }
-  }, [ready, authenticated, user, getAccessToken, setUser]);
+  }, [ready, authenticated, user, getAccessToken, setUser, wallets]);
 
   useEffect(() => {
     if (ready && authenticated && user) {

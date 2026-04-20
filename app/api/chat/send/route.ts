@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyRequest } from "@/lib/auth/verify-request";
 
 // Simple rate limit: track last message time per user
 const lastMessageTime = new Map<string, number>();
@@ -23,11 +24,19 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
   try {
-    const { userId, username, message } = await request.json();
+    const body = await request.json();
+    const authed = await verifyRequest(request, body);
+    if (!authed) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!userId || !username || !message) {
+    const userId = authed.dbUserId;
+    const username = authed.username;
+    const { message } = body;
+
+    if (!message || typeof message !== "string") {
       return NextResponse.json(
-        { error: "userId, username, and message required" },
+        { error: "message required" },
         { status: 400 }
       );
     }

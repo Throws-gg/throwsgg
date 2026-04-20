@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyCron } from "@/lib/cron/verify";
 
 /**
  * GET /api/cron/affiliate-tiers
@@ -13,11 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  *   Tier 3 (Owner)   : $100k+             → 45% of NGR
  */
 export async function GET(request: NextRequest) {
-  // Vercel Cron sets this header; also allow manual trigger via env secret
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!verifyCron(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

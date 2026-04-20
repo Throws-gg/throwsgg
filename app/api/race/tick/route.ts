@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tick } from "@/lib/racing/engine";
+import { verifyCron } from "@/lib/cron/verify";
 
 async function handle(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  const isDev = process.env.NODE_ENV === "development";
-
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !isDev) {
+  if (!verifyCron(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
