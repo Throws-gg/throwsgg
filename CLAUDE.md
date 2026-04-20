@@ -203,6 +203,34 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 4. `RaceCanvas.tsx` — narrower position leaderboard panel (116px × UI_SCALE, 6px right gutter) so leading horses don't collide with the panel before camera scroll kicks in.
 5. `lib/racing/engine.ts` — `settleRace()` now *self-heals* if finish positions are missing: it re-runs the simulation instead of throwing "No winner found" forever. Protects prod against a deploy or crash interrupting `runRace()` mid-flight.
 
+## Session handoff — active context (refresh this when picking up)
+
+**Last worked:** April 2026. Focus was pre-launch polish on the affiliate program, bonus system, and withdrawal UX.
+
+**Test account:** `degen_9vmqb9` (signed up via a referral code for testing). Had its balance manually clawed back after a bonus-abuse test case with:
+```sql
+update users set balance = 0, bonus_balance = 16, wagering_remaining = 50
+where username = 'degen_9vmqb9';
+```
+Don't treat this user's numbers as representative of real behaviour.
+
+**Hot wallet setup:** Phantom (burner account in a dedicated Chrome profile). Private key in Vercel env as `HOT_WALLET_PRIVATE_KEY` (base58). Was funded for the mainnet withdrawal test. Needs topping up to $500-1000 + 0.2-0.5 SOL for soft launch.
+
+**Cold wallet:** Ledger Nano S Plus ordered from ledger.com (NOT Amazon). Holds bulk of bankroll once arrived.
+
+**Open decisions / "probably next":**
+- **0x-address rejection** in the withdraw panel — discussed but not implemented. Would block Metamask/ETH-format paste errors client-side before users fire a bad withdrawal. 5-line change.
+- **Tightening Privy loginMethods** — currently `["email", "google", "wallet"]` which includes Metamask. Filtering to Solana-only wallets would reduce the "signed in but wrong-chain wallet" footgun. Open question: worth the friction of fewer login options?
+- **Admin SOL-balance monitor** — should alert when hot wallet SOL drops below 0.05 (withdrawals silently fail without gas). Not built.
+- **Post-win share nudge** — growth lever discussed: auto-open X share sheet after a big win. Deferred to post-launch.
+- **Cross-device referral attribution cookie** — localStorage-only attribution loses clicks when user clicks on mobile and signs up on desktop. Discussed, not built. Post-launch work.
+- **Bonus tightening** — 3x wagering is very generous. Post-launch: if `bonus net cost` per user trends above $25, bump multiplier to 10x.
+
+**Collaboration style reminders** (from memory, worth reinforcing):
+- Connor pushes incrementally after each feature — don't batch. Migrations must be applied to Supabase manually BEFORE pushing code that depends on them (not the other way around, or users hit 500s).
+- Solo dev / vibe coder — explanations should be business-impact first, then technical. Lean on markdown bullets.
+- `no code pushing yet` means "don't commit/push" but still implement locally.
+
 ## Recent migrations applied to prod Supabase (April 2026)
 
 - **018_username_changes.sql** ✅ applied — adds `users.username_changed_at` for the 7-day username edit cooldown.
