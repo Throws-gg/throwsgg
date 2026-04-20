@@ -235,29 +235,42 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
-### 2026-04-21 — Terminal B (pre-launch security audit)
+### 2026-04-21 — Terminal B (pre-launch security audit) — **SHIPPED TO PROD**
 
 Driving the audit at repo root `SECURITY_AUDIT_2026-04-20.md` + overlapping spec in `swarm-research-for-launch/33-auth-remediation-spec.md` / `00-EXECUTIVE-SUMMARY.md`. Four-agent sweep found ~20 exploitable issues — auth, money flows, race fairness, client/infra.
 
-- **Phase 1 ✅ committed locally as `7da9c78` (NOT pushed — awaiting Vercel env verification):**
-  - `lib/env.ts` + `instrumentation.ts` — zod env loader. Prod boot throws if `PRIVY_APP_SECRET` / `ADMIN_PASSWORD` / `ADMIN_SESSION_SALT` / `CRON_SECRET` / `HOT_WALLET_PRIVATE_KEY` missing. Silent dev fallbacks no longer flip on in prod.
-  - `lib/auth/privy.ts` + `verify-request.ts` — `isDevMode()` refuses in prod; `verifyRequest` throws defense-in-depth.
-  - `lib/auth/admin-password.ts` — dropped `"admin"` / `"throws-dev-salt"` fallbacks in prod.
-  - `lib/cron/verify.ts` (new) — constant-time `CRON_SECRET` check, required in prod. Applied to all 4 cron routes.
-  - `app/api/chat/send/route.ts` — now calls `verifyRequest`; userId + username derived server-side. **Closes chat impersonation.**
-  - `app/api/wallet/deposit/route.ts` — now calls `verifyRequest`; walletAddress looked up from `users.wallet_address`. **Closes the confused-deputy deposit-crediting vector.**
-  - `app/api/auth/sync/route.ts` — writes `solanaAddress` → `users.wallet_address` write-once; backfills existing users only when null. (Note: Terminal A's `verifyFingerprint` wiring is compatible + additive — left intact.)
-  - `components/layout/Providers.tsx` + `hooks/useDepositMonitor.ts` — pass Privy Solana address up; deposit monitor now uses `useAuthedFetch`.
-  - **Deleted:** `app/api/bet/{place,cancel,history}` (legacy RPS, no auth) and `app/api/dev/user` (dev-only $1000 minter).
-- **Phase 2a ✅ committed locally as `7f090da` (NOT pushed):** Race fairness — R1 probability leak + TOCTOU liability cap. Migration 022 ✅ applied to prod.
-- **Phase 2b ✅ committed locally as `60683dc` (NOT pushed):** Money integrity — non-USDC SPL guard, deposit double-credit race (W1), withdraw verify-before-refund (W2), bonus cancel + wagering counter (W5/W6), self-referral block (W7). Migrations 023, 024, 025 ✅ all applied to prod.
-  - 1 file intentionally **not** in 60683dc: `app/api/auth/sync/route.ts`. Contains my signup_fingerprint/signup_ip/normalized_email backfill (needed by 025's self-referral check) tangled with Terminal A's welcome-email + verifyFingerprint work. Ships when Terminal A commits their email infra bundle. Until then, 025's self-referral block is DEPLOYED BUT INERT for new signups (existing users whose fingerprint/IP/email got populated via grant_signup_bonus still trip the check — only the cap-hit / bonus-disabled signup paths are un-deduped).
-- **Everything that's done:** R1, TOCTOU, SPL guard, W1, W2, W5, W6, W7 — all 7 Phase-2 audit tasks complete. Typecheck clean; commits build standalone.
-- **Operator actions before pushing:**
-  1. Ensure Vercel prod has `ADMIN_PASSWORD` ≥12 chars + `ADMIN_SESSION_SALT` ≥32 chars + `CRON_SECRET` ≥20 chars — env loader (`lib/env.ts`) throws at boot otherwise (this is Phase 1's boot-fail logic, NOT new to Phase 2).
-  2. Migrations 022/023/024/025 all applied ✅. Nothing more to apply for Phase 2.
-  3. After Terminal A commits their email bundle, cherry-pick the dedup-fields hunk from my local `auth/sync` onto a follow-up commit, or I'll do it in a later session.
-- **Still on the security audit backlog (not launch-blockers, deferred):** hot wallet SOL-balance alert (W4), CSP / X-Frame-Options headers (I3), PostHog PII scrubbing (I4), structured logging to avoid secret leaks in Vercel logs (I5), Privy `loginMethods` tightening (I6), default-auth middleware (A9), admin 2FA, admin CSRF (A6–A8). `SECURITY_AUDIT_2026-04-20.md` section 7 lists full deferred list.
+**Status:** All 14 launch-blockers committed + pushed to `main` + live on Vercel. Connor smoke-tested basic flows (login, bet, cancel, chat, deposit page) — all working. Admin panel testing in progress (2026-04-21 evening).
+
+**Commits on main (origin/main up to `cffde03`):**
+
+| SHA | Phase | What |
+|---|---|---|
+| `7da9c78` | Phase 1 | Auth holes + env loader + legacy-route deletions |
+| `7f090da` | Phase 2a | Race fairness (R1 probability leak + TOCTOU liability cap) |
+| `60683dc` | Phase 2b | Money integrity (SPL guard + W1 deposit race + W2 withdraw + W5/W6 bonus + W7 self-referral) |
+| `b820050` | Docs | CLAUDE.md work log + house-edge policy |
+| `cffde03` | Hotfix | `LIMITS.MAX_WEEKLY_WITHDRAWAL` constant (typecheck unblock) |
+
+**Holes closed (summary):**
+- **Phase 1:** zod env loader + `instrumentation.ts` (prod boot throws on missing secrets, silent dev fallbacks no longer activate in prod); `isDevMode()` prod-guarded in `lib/auth/privy.ts` + `verify-request.ts`; admin password/salt dev fallbacks dropped; `lib/cron/verify.ts` constant-time CRON_SECRET check required in prod (applied to race/tick, game/tick, affiliate-payouts, affiliate-tiers); chat/send + wallet/deposit now call `verifyRequest()` — userId + walletAddress derived server-side (closes chat impersonation + confused-deputy deposit-crediting); `auth/sync` writes `solanaAddress` → `users.wallet_address` write-once; legacy `api/bet/{place,cancel,history}` and `api/dev/user` deleted.
+- **Phase 2a:** `/api/race/state` strips `trueProbability` + `powerScore` until `status === "settled"` (closes the +EV-bot leak); migration 022 rewrites `place_race_bet_atomic` with `p_max_liability` param + `SELECT … FOR UPDATE` on `race_entries` (closes the TOCTOU race where 10 concurrent $1 @ 100× could stack $1.6K vs $720 cap).
+- **Phase 2b:** `getForeignTokenBalances()` + amber UI banner for non-USDC SPL (closes the silent USDT/PYUSD drop); migration 023's partial UNIQUE index on `transactions.tx_hash` + `getUsdcTransfersIn()` (per-signature dedup closes the double-credit race); `sendUsdc` now returns `confirmed | not_submitted | unknown` + `checkSignatureStatus()` polling (no more auto-refund after tx lands on chain); migration 024's `cancel_race_bet_atomic` + `place_race_bet_atomic` rewrite (refund routes proportionally to cash/bonus, wagering only decrements on `from_bonus > 0` — closes the bonus-laundering pathways); migration 025's `accrue_simple_referral_reward` rewrite (skips accrual when referrer and referred share fingerprint / IP / email).
+
+**Known inert piece:** `app/api/auth/sync/route.ts` has an uncommitted hunk that writes `signup_fingerprint` / `signup_ip` / `normalized_email` on every signup (needed by 025's self-referral check for the cap-hit / bonus-disabled signup paths). It's tangled with Terminal A's email-infra work on the same file. Until Terminal A ships their email bundle, 025's self-referral block is **active but only trips for users whose dedup fields got populated via `grant_signup_bonus`** — i.e. first-100 bonused signups. New non-bonus signups won't trip it (referrer DOES have the fields, but referred may not). Low launch-risk because you're still inside the 100-bonus cap, but to close fully, Terminal A's email bundle needs to ship + then my hunk lands on top.
+
+**Migrations applied to prod (idempotent, CREATE OR REPLACE style):**
+- 022 liability cap + TOCTOU fix
+- 023 tx-signature dedup (UNIQUE index + `deposit_addresses.last_processed_slot` + `sol_baseline_lamports`)
+- 024 bonus cancel + wagering counter fix (`cancel_race_bet_atomic` new, `place_race_bet_atomic` rewritten)
+- 025 self-referral block (`accrue_simple_referral_reward` rewrite + `admin_actions` audit writes on block)
+
+**Vercel env vars confirmed set in prod:** `ADMIN_PASSWORD` ≥12 chars, `ADMIN_SESSION_SALT` ≥32 chars, `CRON_SECRET` ≥20 chars, `HOT_WALLET_PRIVATE_KEY`, `PRIVY_APP_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` (rotated to new Supabase "secret key" system).
+
+**Follow-ups for a future session:**
+1. Cherry-pick the `auth/sync` dedup-fields hunk once Terminal A's email bundle is in `main`.
+2. Consider adding an admin UI tab for withdrawals with `metadata.pending_review: true` — these are W2's "confirmation unknown, balance debited" cases needing manual reconciliation. Rare but inevitable; not blocking launch.
+3. Consider filter/view in admin for `admin_actions.action_type = 'referral_self_block'` rows (W7 audit trail) to unblock false positives.
+4. **Deferred security items (not launch-blockers, from `SECURITY_AUDIT_2026-04-20.md` §7):** hot wallet SOL-balance alert (W4), CSP / X-Frame-Options headers (I3), PostHog PII scrubbing of wallet addresses + raw balances (I4), structured logging to prevent secret leaks in Vercel logs (I5), Privy `loginMethods` tightening to Solana-only (I6), default-auth middleware on `/api/**` (A9), admin 2FA (A7), admin CSRF (A8).
 
 ### 2026-04-21 — Terminal A (Phase 4 Resend + emails — scaffolding + welcome)
 - **Migration reservation:** Terminal B has reserved 022, 024, 025. Terminal A owns **026+**.
