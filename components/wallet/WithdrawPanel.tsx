@@ -26,7 +26,7 @@ export function WithdrawPanel() {
 
   const [amount, setAmount] = useState("");
   const [address, setAddress] = useState("");
-  const [useOwnWallet, setUseOwnWallet] = useState(true);
+  const [useOwnWallet, setUseOwnWallet] = useState(false);
   const [status, setStatus] = useState<WithdrawStatus>("idle");
   const [result, setResult] = useState<WithdrawalResult | null>(null);
   const [error, setError] = useState("");
@@ -43,10 +43,11 @@ export function WithdrawPanel() {
   const numAmount = parseFloat(amount) || 0;
   const receiveAmount = Math.max(0, numAmount - fee);
   const maxWithdraw = Math.max(0, balance - fee);
+  const effectiveAddress = useOwnWallet ? privyAddress : address.trim();
   const isValid =
     numAmount >= LIMITS.MIN_WITHDRAWAL &&
     numAmount + fee <= balance &&
-    (useOwnWallet ? !!privyAddress : address.length >= 32);
+    effectiveAddress.length >= 32;
 
   const setQuickAmount = useCallback(
     (pct: number) => {
@@ -71,7 +72,7 @@ export function WithdrawPanel() {
 
     try {
       const token = await getAccessToken();
-      const dest = useOwnWallet ? privyAddress : address;
+      const dest = effectiveAddress;
 
       const res = await fetch("/api/wallet/withdraw", {
         method: "POST",
@@ -102,9 +103,7 @@ export function WithdrawPanel() {
     }
   }, [
     getAccessToken,
-    useOwnWallet,
-    privyAddress,
-    address,
+    effectiveAddress,
     numAmount,
     setBalance,
   ]);
@@ -191,7 +190,7 @@ export function WithdrawPanel() {
 
   // Confirmation state
   if (status === "confirming") {
-    const dest = useOwnWallet ? privyAddress : address;
+    const dest = effectiveAddress;
     return (
       <div className="space-y-4">
         <div className="rounded-2xl border border-white/[0.06] bg-gradient-to-b from-[#14141f] to-[#11111a] p-6 space-y-5">
@@ -305,11 +304,17 @@ export function WithdrawPanel() {
     <div className="space-y-4">
       {/* Amount input */}
       <div className="rounded-2xl border border-white/[0.06] bg-gradient-to-b from-[#14141f] to-[#11111a] p-6 space-y-5">
-        <div className="text-center space-y-1">
+        <div className="text-center space-y-2">
           <h3 className="text-white font-semibold">Withdraw USDC</h3>
-          <p className="text-white/35 text-xs">
-            Sent to your Solana wallet
-          </p>
+          <div className="flex items-center justify-center gap-3 text-[11px] flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green/10 border border-green/20 text-green">
+              <span className="w-1 h-1 rounded-full bg-green animate-pulse" />
+              usually under 5 minutes
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet/10 border border-violet/20 text-violet">
+              no KYC under $2,000
+            </span>
+          </div>
         </div>
 
         {/* Amount field */}
@@ -369,53 +374,50 @@ export function WithdrawPanel() {
 
       {/* Destination address */}
       <div className="rounded-2xl border border-white/[0.06] bg-[#12121a] p-4 space-y-3">
-        <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
-          Send To
-        </p>
-
-        {/* Toggle: own wallet vs custom address */}
-        {privyAddress && (
-          <div className="flex rounded-xl bg-white/[0.03] border border-white/[0.06] p-1">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+            Solana Address
+          </p>
+          {privyAddress && !useOwnWallet && (
             <button
-              onClick={() => setUseOwnWallet(true)}
-              className={cn(
-                "flex-1 py-2 rounded-lg text-xs font-semibold transition-all",
-                useOwnWallet
-                  ? "bg-white/[0.08] text-white shadow-sm"
-                  : "text-white/40 hover:text-white/60"
-              )}
+              onClick={() => {
+                setUseOwnWallet(true);
+                setAddress(privyAddress);
+              }}
+              className="text-[10px] text-violet/80 hover:text-violet font-medium transition-colors"
             >
-              My Wallet
+              use my embedded wallet →
             </button>
+          )}
+          {privyAddress && useOwnWallet && (
             <button
-              onClick={() => setUseOwnWallet(false)}
-              className={cn(
-                "flex-1 py-2 rounded-lg text-xs font-semibold transition-all",
-                !useOwnWallet
-                  ? "bg-white/[0.08] text-white shadow-sm"
-                  : "text-white/40 hover:text-white/60"
-              )}
+              onClick={() => {
+                setUseOwnWallet(false);
+                setAddress("");
+              }}
+              className="text-[10px] text-white/40 hover:text-white/60 font-medium transition-colors"
             >
-              Other Address
+              use different address
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
-        {useOwnWallet && privyAddress ? (
-          <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3.5">
-            <p className="font-mono text-[11px] text-white/50 break-all leading-relaxed text-center">
-              {privyAddress}
-            </p>
-          </div>
-        ) : (
-          <input
-            type="text"
-            placeholder="Solana wallet address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="w-full py-3 px-4 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white/70 text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-violet/40 transition-colors"
-          />
-        )}
+        <input
+          type="text"
+          placeholder="Paste your Solana address"
+          value={useOwnWallet ? privyAddress : address}
+          onChange={(e) => {
+            if (useOwnWallet) setUseOwnWallet(false);
+            setAddress(e.target.value);
+          }}
+          readOnly={useOwnWallet}
+          className={cn(
+            "w-full py-3 px-4 rounded-xl border text-sm font-mono placeholder:text-white/15 focus:outline-none transition-colors",
+            useOwnWallet
+              ? "bg-violet/[0.04] border-violet/20 text-white/70"
+              : "bg-white/[0.03] border-white/[0.08] text-white/70 focus:border-violet/40"
+          )}
+        />
       </div>
 
       {/* Warning */}
@@ -423,8 +425,8 @@ export function WithdrawPanel() {
         <WarningIcon className="w-4 h-4 text-white/20 mt-0.5 shrink-0" />
         <p className="text-white/30 text-[11px] leading-relaxed">
           USDC will be sent on <strong className="text-white/40">Solana</strong>.
+          Sending to another chain will result in lost funds.
           Minimum withdrawal: ${LIMITS.MIN_WITHDRAWAL.toFixed(2)}.
-          Withdrawals are usually instant.
         </p>
       </div>
 

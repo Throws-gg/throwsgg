@@ -159,10 +159,10 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 - Race animation on HTML Canvas with horse sprites and gallop frames
 - Privy auth with JWT verification on all API routes
 - Deposit flow (checks on-chain USDC/SOL balance vs baseline, auto-credits)
-- Withdrawal flow (auto-send <=100, hold >=100 for admin review, rate limited, refund on failure)
+- Withdrawal flow (auto-send <=100, hold >=100 for admin review, rate limited, refund on failure) — **tested on mainnet April 2026, works end-to-end**
 - Chat with Supabase Realtime, system messages for race events + big wins
 - Admin panel (14 pages: dashboard, users, races, affiliates, payouts, transactions, chat, control)
-- Affiliate system: 2-tier (regular referral 10% NGR + approved affiliate 35-45% tiered NGR)
+- Affiliate system: 2-tier (regular referral **20% NGR lifetime** + approved affiliate 35-45% tiered NGR)
 - PostHog analytics: race_completed, bet_settled events with user properties
 - Referral link tracking, vanity slugs, affiliate application flow
 - AI commentary generation via Anthropic API (needs API key set)
@@ -171,6 +171,14 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 - Landing page with two modes: waitlist (default) and live (NEXT_PUBLIC_IS_LIVE=true)
 - Footer links to /terms, /responsible-gambling, /verify, /affiliates
 - Podium results screen (PodiumResults.tsx) — shows 1st elevated centre, 2nd below-left, 3rd below-right with horse sprite idle animation, gold/silver/bronze metallic rings, serif Roman numerals, fake "TOTAL WON THIS RACE" pot ($313.57–$1688.71 across 8–84 winning tickets, seeded off race id so it's stable per race). Replaces the race-card list during isResults. One-shot gold embers + sheen — no looping shake.
+- Editable usernames — pencil icon in `/profile` opens inline modal, 3-20 chars `[a-z0-9_]`, reserved-word check, case-insensitive uniqueness, 7-day cooldown. API at `/api/user/username`, cooldown tracked via `users.username_changed_at`.
+- Referral link card on `/profile` — shows `throws.gg/r/CODE` with Copy + Share on X, links to full `/referrals` page. Uses `referralCode` from userStore (populated by `/api/auth/sync`).
+- Admin vanity affiliate links — `/admin/affiliates` "Custom Links" tab creates slugs like `throws.gg/drake` mapped to a username. Case-insensitive + @-prefix-tolerant lookup, copy-link action per row. Auth via `verifyAdmin` (password cookie), NOT users.role.
+- Bonus-abuse hole plugged — `race_bets.from_bonus_amount` tracks the bonus portion of each stake; `settle_race` routes payouts proportionally: bonus-funded wins → `bonus_balance` (stays locked), cash-funded wins → `balance`. When `wagering_remaining` hits 0, full `bonus_balance` converts to cash in one shot. If bonus expired, winnings redirect to cash rather than burn.
+- Bonus rules loosened (pre-launch) — max-bet-while-bonus $5 → $100 (effectively removed), min-odds-to-count 2.0 → 1.0 (any odds count toward wagering). 3x multiplier and 14-day expiry unchanged.
+- WageringProgress banner — tap-to-expand reveals the 4 bonus rules so users actually understand the requirement.
+- Withdraw UI redesigned (April 2026) — destination field empty by default (no more pre-filled "random-looking" embedded wallet), small "use my embedded wallet →" link surfaces the Privy address non-pushily, status chips at top show "usually under 5 minutes" + "no KYC under $2,000", warning copy explicitly mentions "sending to another chain will result in lost funds".
+- Recent Transactions on `/wallet` — `/api/transactions` endpoint (auth via `verifyRequest`) returns the user's ledger. Previously the wallet page was fetching from `/api/bet/history` which queried the wrong table and never returned matching shape. Re-fetches on window focus.
 
 ## FIXED: Race animation was stuck at 0 seconds in production
 
@@ -195,14 +203,33 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 4. `RaceCanvas.tsx` — narrower position leaderboard panel (116px × UI_SCALE, 6px right gutter) so leading horses don't collide with the panel before camera scroll kicks in.
 5. `lib/racing/engine.ts` — `settleRace()` now *self-heals* if finish positions are missing: it re-runs the simulation instead of throwing "No winner found" forever. Protects prod against a deploy or crash interrupting `runRace()` mid-flight.
 
+## Recent migrations applied to prod Supabase (April 2026)
+
+- **018_username_changes.sql** ✅ applied — adds `users.username_changed_at` for the 7-day username edit cooldown.
+- **019_referral_20pct_lifetime.sql** ✅ applied — updates `accrue_simple_referral_reward()` to pay 20% NGR lifetime (was 10% / 90-day window). Signature unchanged, safe to re-run.
+- **020_loosen_bonus_rules.sql** ✅ applied — `UPDATE bonus_config` row: `max_bet_while_bonus` 5→100, `min_odds_to_count` 2.0→1.0.
+- **021_bonus_payout_routing.sql** ✅ applied — adds `race_bets.from_bonus_amount` column, rewrites `place_race_bet_atomic` to persist the bonus portion of each stake, rewrites `settle_race` to route payouts based on the bonus ratio. This is the launch-blocker fix — without it, a user can win a bonus bet and withdraw immediately.
+
+All four are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — safe to re-run.
+
+## Bonus economics (for reference)
+
+- $20 signup bonus, first 100 signups only (`bonus_config.signup_cap`), 14-day expiry
+- 3x wagering ($60 total volume required to unlock bonus_balance → cash)
+- Cash is always bet before bonus. Payouts routed proportionally by stake source.
+- At 3% house edge, expected cost per bonus user: ~$18 EV negative. Max aggregate loss: $1.8K (100 × $18). Acceptable CAC.
+- Retention after bonus clears determines whether this is profitable. Track `bonus net cost` per user post-launch; tighten multiplier to 10x if trending above $25/user.
+
 ## MVP launch checklist — what still needs to be done
 
 ### BEFORE LAUNCH
 
-1. **Test withdrawals on mainnet** — Hot wallet is funded but withdrawals have never been tested end-to-end. Steps: ensure HOT_WALLET_PRIVATE_KEY is set in Vercel production env, deposit $5-10 USDC, withdraw $5 minimum from the wallet page, verify USDC arrives on Solscan. The code handles auto-send (<=100), admin review (>100), and auto-refund on failure.
+1. ✅ **Withdrawals tested on mainnet** (April 2026) — end-to-end working. Hot wallet is a Phantom wallet, private key in Vercel env as `HOT_WALLET_PRIVATE_KEY` (base58 format). Fund with 0.1 SOL + USDC for gas + float.
 2. **Set NEXT_PUBLIC_IS_LIVE=true** in Vercel env when ready to go live — switches landing page CTA from waitlist to "start betting → /racing"
 3. **Verify race animation works on production** after deploying the timing fix. The races must be visually watchable.
-4. **Verify deposit flow works** — user connects Privy wallet, sends USDC to their embedded wallet address, clicks deposit, balance updates.
+4. ✅ **Deposit flow works** — user connects Privy wallet, sends USDC to their embedded wallet address, clicks deposit, balance updates.
+5. **Cold wallet setup** — Ledger Nano S Plus ordered from ledger.com. Move bulk of bankroll (~$8-9K of $10K) to cold once arrived. Hot stays funded with 1-2 weeks of expected withdrawal float (~$1-2K).
+6. **Top up hot wallet to $500-1000** before soft launch. Also keep 0.2-0.5 SOL for gas.
 
 ### NOT doing before launch (accepted risk)
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useUserStore } from "@/stores/userStore";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { DepositPanel } from "@/components/wallet/DepositPanel";
 import { WithdrawPanel } from "@/components/wallet/WithdrawPanel";
 import { cn } from "@/lib/utils";
@@ -17,16 +18,16 @@ interface Transaction {
 
 export default function WalletPage() {
   const { userId, balance } = useUserStore();
+  const authedFetch = useAuthedFetch();
   const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
   const [txs, setTxs] = useState<Transaction[]>([]);
 
   const fetchTxs = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await fetch(`/api/bet/history?userId=${userId}&limit=10`);
+      const res = await authedFetch(`/api/transactions?limit=15`);
       if (!res.ok) return;
       const data = await res.json();
-      // Try to map whatever format comes back
       if (Array.isArray(data.transactions)) {
         setTxs(data.transactions.map((t: Record<string, unknown>) => ({
           id: String(t.id || ""),
@@ -38,10 +39,18 @@ export default function WalletPage() {
         })));
       }
     } catch { /* ignore */ }
-  }, [userId]);
+  }, [userId, authedFetch]);
 
   useEffect(() => {
     fetchTxs();
+  }, [fetchTxs]);
+
+  // Re-fetch on window focus so a fresh deposit/withdraw shows up when the
+  // user comes back to the tab.
+  useEffect(() => {
+    const onFocus = () => fetchTxs();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [fetchTxs]);
 
   return (
