@@ -56,6 +56,7 @@ export const LIMITS = {
   MIN_BET: 0.1,
   MIN_DEPOSIT: 1.0,
   MIN_WITHDRAWAL: 5.0,
+  MAX_WEEKLY_WITHDRAWAL: 2000,
 } as const;
 
 export const BANKROLL = {
