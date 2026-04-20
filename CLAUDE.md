@@ -4,7 +4,9 @@
 
 ## What this is
 
-A crypto-native virtual horse racing betting platform. Users deposit USDC/SOL via Privy embedded wallets, bet on virtual horse races with fixed odds (16 persistent horses, 8 per race), and withdraw winnings. We are the house. 3% effective house edge via 115-118% overround. 480 races/day (one every 3 minutes). Provably fair via HMAC-SHA256.
+A crypto-native virtual horse racing betting platform. Users deposit USDC/SOL via Privy embedded wallets, bet on virtual horse races with fixed odds (16 persistent horses, 8 per race), and withdraw winnings. We are the house. ~9% house edge via 1.10 overround (category norm for virtual sports is 8–15%). 480 races/day (one every 3 minutes). Provably fair via HMAC-SHA256.
+
+**House edge policy:** We don't headline the exact overround in marketing copy, but we don't hide it either — the simulation is deterministic and users can sum implied probabilities on `/api/race/state` or verify outcomes via `/verify`. If asked: "Yes, ~9% overround — industry-standard for virtual sports. We aim to lower it as bankroll and volume grow." Never deny it. Never raise it silently — if it changes, announce it.
 
 **Market positioning:** We are in the **virtual sports / virtual horse racing** category — NOT "AI horse racing". In all outbound copy (job posts, affiliate outreach, marketing, UI), lead with "virtual horse racing" or "virtual sports" — never "AI horse racing". Virtual sports is an established iGaming category that affiliates and users already understand.
 
@@ -179,6 +181,9 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 - WageringProgress banner — tap-to-expand reveals the 4 bonus rules so users actually understand the requirement.
 - Withdraw UI redesigned (April 2026) — destination field empty by default (no more pre-filled "random-looking" embedded wallet), small "use my embedded wallet →" link surfaces the Privy address non-pushily, status chips at top show "usually under 5 minutes" + "no KYC under $2,000", warning copy explicitly mentions "sending to another chain will result in lost funds".
 - Recent Transactions on `/wallet` — `/api/transactions` endpoint (auth via `verifyRequest`) returns the user's ledger. Previously the wallet page was fetching from `/api/bet/history` which queried the wrong table and never returned matching shape. Re-fetches on window focus.
+- Withdraw Solana-only guard (April 2026) — client-side rejects `0x…` (EVM) paste explicitly and anything that doesn't match base58 charset / 32–44 chars. Inline red error under the input. Server mirrors the 0x rejection with a clearer error before `isValidSolanaAddress()`. Closes the Metamask-paste footgun.
+- Weekly withdrawal cap $2,000 (April 2026, MVP phase) — `LIMITS.MAX_WEEKLY_WITHDRAWAL` enforced rolling-7-day on both client and `/api/wallet/withdraw`. Surfaced in-UI as a cyan chip next to "no KYC under $2,000". Warning copy explains Solana-only + exchange fiat off-ramp path ("withdraw to an exchange's Solana USDC deposit address, convert there"). Copy positions the cap as "while we scale — lifts post-launch", not house-favouring.
+- House edge raised 4.03% → ~9.09% (April 2026) — `OVERROUND` 1.042 → 1.10 in `lib/racing/odds-engine.ts`. Sits inside the 8–15% virtual-sports category band, gives the $10K bankroll variance headroom at 480 races/day. Bonus economics + root `CLAUDE.md` updated to match. Migration-free — pure code change, takes effect on next odds calc.
 
 ## FIXED: Race animation was stuck at 0 seconds in production
 
@@ -203,9 +208,91 @@ Driven by Vercel cron hitting `/api/race/tick` every minute. The tick function c
 4. `RaceCanvas.tsx` — narrower position leaderboard panel (116px × UI_SCALE, 6px right gutter) so leading horses don't collide with the panel before camera scroll kicks in.
 5. `lib/racing/engine.ts` — `settleRace()` now *self-heals* if finish positions are missing: it re-runs the simulation instead of throwing "No winner found" forever. Protects prod against a deploy or crash interrupting `runRace()` mid-flight.
 
-## Session handoff — active context (refresh this when picking up)
+## Multi-terminal coordination
 
-**Last worked:** April 2026. Focus was pre-launch polish on the affiliate program, bonus system, and withdrawal UX.
+Connor runs multiple Claude terminals in parallel. Every terminal should:
+1. **Read the "Retention roadmap in progress" and "In-flight work log" sections below before starting** to avoid stepping on another terminal's work.
+2. **Append a dated entry to the In-flight work log when you start and finish anything non-trivial** — even research. Include: date, terminal note (e.g. "Terminal A"), what you touched, what's blocked/next.
+3. **Migrations are serialized.** Before writing a new migration, check the log for pending unapplied migrations. Don't write 022 if another terminal is mid-way through writing 022 — bump to 023.
+4. **Env var additions get logged** — if you add a new `FOO_KEY`, note it under the Environment variables section AND in the work log so the other terminals know to reference it.
+
+## Retention roadmap in progress (April 2026)
+
+Research doc `swarm-research-for-launch/06-research-retention-mechanics.md` drives this. Connor approved the full plan: retention > acquisition. OVERROUND is 1.10 (~9% edge), which gives more headroom than the doc's 4% assumption — all bankroll math below uses 9%.
+
+Phase order (each phase can be picked up by a fresh terminal; check the work log for status before starting):
+
+- **Phase 1 — Rakeback** (10–14h). Instant, tiered on `users.total_wagered`. 5/10/15/20/25% of edge at $0/$500/$5K/$25K/$100K lifetime. Accrue on each `settle_race` call. Claim endpoint + UI card on `/wallet`. Memory note `feedback_vip_rakeback.md` previously said "no rakeback at launch" — Connor reopened and approved for launch.
+- **Phase 2 — FingerprintJS wiring** ✅ SHIPPED (see work log 2026-04-21).
+- **Phase 3 — Daily login bonus** (6–10h). Depends on Phase 2. Tier-scaled $0.10–$0.50 wager-locked (1×). Needs new `daily_claims` table + claim endpoint + UI.
+- **Phase 4 — Resend + email templates** (15–20h). Full retention-geared template set (see list below). Privy captures email on social login, so the address list already exists. New `lib/email/` with typed template system, domain verification on throws.gg (SPF/DKIM/DMARC). User preference page at `/settings`.
+  - Templates to build: welcome D0, first deposit confirmation, first bet placed, big win (>$50), bonus expiring D12, streak at risk, weekly cashback ready, rakeback ready, reactivation D7/D14/D30, withdrawal sent, withdrawal held for review, deposit received, weekly leaderboard result, RG monthly check-in.
+- **Phase 5 — Streaks + leaderboard wire-up** (20–28h). Login/bet streaks with freeze (Duolingo model). Replace the leaderboard stub at `app/(game)/leaderboard/page.tsx` (30-line placeholder) with a daily/weekly wager-race cron + snapshots table. Pool = % of prior period GGR.
+
+**Deferred past launch:** Lucky Spin, VIP tier UI, achievements, triggered deposit match, quests, cashback (bankroll too thin at 10% of losses — revisit once volume proven).
+
+## In-flight work log
+
+Append-only. Newest entries at the top. Keep bullets terse.
+
+### 2026-04-21 — Terminal B (pre-launch security audit)
+
+Driving the audit at repo root `SECURITY_AUDIT_2026-04-20.md` + overlapping spec in `swarm-research-for-launch/33-auth-remediation-spec.md` / `00-EXECUTIVE-SUMMARY.md`. Four-agent sweep found ~20 exploitable issues — auth, money flows, race fairness, client/infra.
+
+- **Phase 1 ✅ committed locally as `7da9c78` (NOT pushed — awaiting Vercel env verification):**
+  - `lib/env.ts` + `instrumentation.ts` — zod env loader. Prod boot throws if `PRIVY_APP_SECRET` / `ADMIN_PASSWORD` / `ADMIN_SESSION_SALT` / `CRON_SECRET` / `HOT_WALLET_PRIVATE_KEY` missing. Silent dev fallbacks no longer flip on in prod.
+  - `lib/auth/privy.ts` + `verify-request.ts` — `isDevMode()` refuses in prod; `verifyRequest` throws defense-in-depth.
+  - `lib/auth/admin-password.ts` — dropped `"admin"` / `"throws-dev-salt"` fallbacks in prod.
+  - `lib/cron/verify.ts` (new) — constant-time `CRON_SECRET` check, required in prod. Applied to all 4 cron routes.
+  - `app/api/chat/send/route.ts` — now calls `verifyRequest`; userId + username derived server-side. **Closes chat impersonation.**
+  - `app/api/wallet/deposit/route.ts` — now calls `verifyRequest`; walletAddress looked up from `users.wallet_address`. **Closes the confused-deputy deposit-crediting vector.**
+  - `app/api/auth/sync/route.ts` — writes `solanaAddress` → `users.wallet_address` write-once; backfills existing users only when null. (Note: Terminal A's `verifyFingerprint` wiring is compatible + additive — left intact.)
+  - `components/layout/Providers.tsx` + `hooks/useDepositMonitor.ts` — pass Privy Solana address up; deposit monitor now uses `useAuthedFetch`.
+  - **Deleted:** `app/api/bet/{place,cancel,history}` (legacy RPS, no auth) and `app/api/dev/user` (dev-only $1000 minter).
+- **Phase 2a ✅ committed locally as `7f090da` (NOT pushed):** Race fairness — R1 probability leak + TOCTOU liability cap. Migration 022 ✅ applied to prod.
+- **Phase 2b ✅ committed locally as `60683dc` (NOT pushed):** Money integrity — non-USDC SPL guard, deposit double-credit race (W1), withdraw verify-before-refund (W2), bonus cancel + wagering counter (W5/W6), self-referral block (W7). Migrations 023, 024, 025 ✅ all applied to prod.
+  - 1 file intentionally **not** in 60683dc: `app/api/auth/sync/route.ts`. Contains my signup_fingerprint/signup_ip/normalized_email backfill (needed by 025's self-referral check) tangled with Terminal A's welcome-email + verifyFingerprint work. Ships when Terminal A commits their email infra bundle. Until then, 025's self-referral block is DEPLOYED BUT INERT for new signups (existing users whose fingerprint/IP/email got populated via grant_signup_bonus still trip the check — only the cap-hit / bonus-disabled signup paths are un-deduped).
+- **Everything that's done:** R1, TOCTOU, SPL guard, W1, W2, W5, W6, W7 — all 7 Phase-2 audit tasks complete. Typecheck clean; commits build standalone.
+- **Operator actions before pushing:**
+  1. Ensure Vercel prod has `ADMIN_PASSWORD` ≥12 chars + `ADMIN_SESSION_SALT` ≥32 chars + `CRON_SECRET` ≥20 chars — env loader (`lib/env.ts`) throws at boot otherwise (this is Phase 1's boot-fail logic, NOT new to Phase 2).
+  2. Migrations 022/023/024/025 all applied ✅. Nothing more to apply for Phase 2.
+  3. After Terminal A commits their email bundle, cherry-pick the dedup-fields hunk from my local `auth/sync` onto a follow-up commit, or I'll do it in a later session.
+- **Still on the security audit backlog (not launch-blockers, deferred):** hot wallet SOL-balance alert (W4), CSP / X-Frame-Options headers (I3), PostHog PII scrubbing (I4), structured logging to avoid secret leaks in Vercel logs (I5), Privy `loginMethods` tightening (I6), default-auth middleware (A9), admin 2FA, admin CSRF (A6–A8). `SECURITY_AUDIT_2026-04-20.md` section 7 lists full deferred list.
+
+### 2026-04-21 — Terminal A (Phase 4 Resend + emails — scaffolding + welcome)
+- **Migration reservation:** Terminal B has reserved 022, 024, 025. Terminal A owns **026+**.
+- **Installed:** `resend`, `@react-email/components`, `@react-email/render`.
+- **New files:**
+  - `lib/email/client.ts` — Resend singleton, no-ops when `RESEND_API_KEY` unset.
+  - `lib/email/categories.ts` — 8 categories (`transactional` always sends; others respect user prefs). Defaults opt-in except `promotional`.
+  - `lib/email/send.ts` — typed send helper. Handles preference gating, idempotency via `email_log`, render, logging.
+  - `lib/email/templates/_layout.tsx` — shared dark-theme shell (throws.gg purple logo, footer with preferences/RG/terms links).
+  - `lib/email/templates/Welcome.tsx` — welcome + signup bonus explainer.
+  - `lib/email/templates/DepositReceived.tsx` — deposit confirmation (transactional).
+  - `lib/email/templates/WithdrawalSent.tsx` — withdrawal confirmation w/ Solscan link (transactional).
+- **Migration 026_email_infra.sql ⏳ NOT YET APPLIED** — adds `users.email_preferences` (jsonb), `users.email_unsubscribed_at`, `users.email` column + unique index; creates `email_log` table for analytics + idempotency.
+- **Wired:** `/api/auth/sync` now writes `email` into `users.email` on signup AND fires the welcome email (best-effort, won't block response). Uses idempotency key `welcome:<userId>`.
+- **Env vars needed in Vercel prod (and locally if testing):** `RESEND_API_KEY`, optional `EMAIL_FROM` (defaults `throws.gg <no-reply@throws.gg>`), optional `EMAIL_REPLY_TO` (defaults `support@throws.gg`).
+- **Still to build (12 templates):** first deposit nudge, first bet placed, big win (>$50), bonus expiring D12, streak at risk, weekly cashback ready, rakeback ready, reactivation D7/D14/D30, weekly leaderboard result, RG monthly check-in.
+- **Still to build (infrastructure):** `/settings` email preferences UI, `/api/user/email-preferences` endpoint, Resend webhook handler for opened/clicked/bounced/complaint → writes back to `email_log`, unsubscribe link handling.
+- **Operator pre-push checklist for this phase:**
+  1. Apply migration 026 to prod Supabase (CREATE OR REPLACE / IF NOT EXISTS — safe to re-run).
+  2. Resend account: add `throws.gg` as sending domain, drop SPF/DKIM/DMARC in DNS, wait for verification.
+  3. Set `RESEND_API_KEY` in Vercel prod env.
+  4. Test welcome email flow with a throwaway signup.
+
+### 2026-04-21 — Terminal A (retention kickoff)
+- **Reviewed** `swarm-research-for-launch/06-research-retention-mechanics.md` against current code. Confirmed: leaderboard page is a 30-line stub, no streaks/rakeback/daily-bonus/quests/push/email exist, `@fingerprintjs/fingerprintjs-pro` SDK is installed but wasn't wired up.
+- **Phase 2 SHIPPED — FingerprintJS server-side verification:**
+  - Added `lib/fingerprint/server.ts` — calls Fingerprint Server API, checks visitor ID freshness (<5min), IP match, bot/incognito flags. No-ops gracefully when `FINGERPRINT_SECRET_KEY` isn't set.
+  - Wired into `app/api/auth/sync/route.ts` — untrusted/spoofed fingerprints get nulled before being passed to `grant_signup_bonus`, so the $20 bonus dedup can't be farmed with fake visitor IDs. Added `fingerprint_verified/reason/bot_detected/incognito` to the `signup_completed` PostHog event.
+  - `lib/fingerprint/client.ts` and Providers.tsx wiring already existed — no changes there.
+  - **Env:** needs `NEXT_PUBLIC_FINGERPRINT_PUBLIC_KEY` + `FINGERPRINT_SECRET_KEY` in Vercel. Connor confirmed set in Vercel prod but NOT in `.env.local` (local dev will no-op — acceptable).
+- **Not yet started:** Phases 1, 3, 4, 5. Next likely = Phase 1 (rakeback) or Phase 4 (Resend). Pending Connor's choice.
+
+### 2026-04 — (earlier work) Session handoff — active context (refresh this when picking up)
+
+**Last worked:** 2026-04-21. Focus was withdraw hardening (Solana-only address guard + $2K weekly MVP cap) and economics calibration (overround 1.042 → 1.10 ≈ 9% edge). No migrations this session. A 50k-race Monte Carlo sim of the new overround was kicked off via `npx tsx scripts/simulate-odds.ts 50000` to validate book % / favourite rate / bucket calibration — results should be reviewed on next pickup if not already in hand (check `/private/tmp/claude-501/-Users-connorrawiri-Documents-RPS/*/tasks/bbmhfwypt.output`).
 
 **Test account:** `degen_9vmqb9` (signed up via a referral code for testing). Had its balance manually clawed back after a bonus-abuse test case with:
 ```sql
@@ -219,7 +306,7 @@ Don't treat this user's numbers as representative of real behaviour.
 **Cold wallet:** Ledger Nano S Plus ordered from ledger.com (NOT Amazon). Holds bulk of bankroll once arrived.
 
 **Open decisions / "probably next":**
-- **0x-address rejection** in the withdraw panel — discussed but not implemented. Would block Metamask/ETH-format paste errors client-side before users fire a bad withdrawal. 5-line change.
+- **Security P0s from the swarm research audit** (`swarm-research-for-launch/00-EXECUTIVE-SUMMARY.md`, §C + `33-auth-remediation-spec.md`) — highest priority. (a) `app/api/chat/send/route.ts` trusts body `userId` + `username` with no `verifyRequest()`; (b) `app/api/wallet/deposit/route.ts` trusts body `userId` + `walletAddress` fully unauthed (confused-deputy credit risk); (c) `CRON_SECRET` is optional — if unset, `/api/race/tick` + payout crons are public; (d) env-var boot assertions needed for `CRON_SECRET`, `PRIVY_APP_SECRET`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SALT`; (e) non-USDC SPL deposits silently lost in `lib/wallet/solana.ts:43-60` — user-fund-loss event, needs detect-and-warn; (f) TOCTOU race on per-horse liability cap in `race/bet/route.ts:71-91` — move check inside `place_race_bet_atomic` with `FOR UPDATE`; (g) `shortenOdds()` has zero callsites so "dynamic odds" claims are false — either wire it into `engine.ts` close flow or strike any such copy.
 - **Tightening Privy loginMethods** — currently `["email", "google", "wallet"]` which includes Metamask. Filtering to Solana-only wallets would reduce the "signed in but wrong-chain wallet" footgun. Open question: worth the friction of fewer login options?
 - **Admin SOL-balance monitor** — should alert when hot wallet SOL drops below 0.05 (withdrawals silently fail without gas). Not built.
 - **Post-win share nudge** — growth lever discussed: auto-open X share sheet after a big win. Deferred to post-launch.
@@ -237,15 +324,19 @@ Don't treat this user's numbers as representative of real behaviour.
 - **019_referral_20pct_lifetime.sql** ✅ applied — updates `accrue_simple_referral_reward()` to pay 20% NGR lifetime (was 10% / 90-day window). Signature unchanged, safe to re-run.
 - **020_loosen_bonus_rules.sql** ✅ applied — `UPDATE bonus_config` row: `max_bet_while_bonus` 5→100, `min_odds_to_count` 2.0→1.0.
 - **021_bonus_payout_routing.sql** ✅ applied — adds `race_bets.from_bonus_amount` column, rewrites `place_race_bet_atomic` to persist the bonus portion of each stake, rewrites `settle_race` to route payouts based on the bonus ratio. This is the launch-blocker fix — without it, a user can win a bonus bet and withdraw immediately.
+- **022_liability_cap_atomic.sql** ✅ applied (Terminal B, 2026-04-21) — rewrites `place_race_bet_atomic` to take a new optional `p_max_liability` param and do the per-horse liability aggregate inside the RPC under `SELECT … FOR UPDATE` on `race_entries`. Closes the TOCTOU race (Scout-1 T1: 10 concurrent $1 @ 100× could stack $1.6K against a $720 cap). CREATE OR REPLACE, idempotent, safe to re-run.
+- **023_deposit_tx_signature_dedup.sql** ✅ applied (Terminal B, 2026-04-21) — partial `UNIQUE` index on `transactions(tx_hash) WHERE tx_hash IS NOT NULL` (replaces the old non-unique `idx_tx_hash`). Adds `deposit_addresses.last_processed_slot` cursor and `deposit_addresses.sol_baseline_lamports` for per-wallet deposit dedup. Every incoming USDC transfer signature now credits exactly once — concurrent retries hit a 23505 unique-violation and silently skip. **If rerunning ever:** check `SELECT tx_hash, count(*) FROM transactions WHERE tx_hash IS NOT NULL GROUP BY 1 HAVING count(*) > 1;` first — dups must be cleared before the unique index can be created.
+- **024_bonus_cancel_and_wagering_fix.sql** ✅ applied (Terminal B, 2026-04-21) — `cancel_race_bet_atomic` RPC added (routes refund proportionally to cash/bonus, restores `wagering_remaining`, reverses `total_wagered`). `place_race_bet_atomic` rewritten again (now only decrements `wagering_remaining` when `v_from_bonus > 0` — closes the cash-wagering-to-unlock-bonus laundering path). `DROP FUNCTION IF EXISTS place_race_bet_atomic(8 args)` prevents overload coexistence.
+- **025_self_referral_block.sql** ✅ applied (Terminal B, 2026-04-21) — `accrue_simple_referral_reward` rewritten to skip accrual when referrer and referred share `signup_fingerprint` / `signup_ip` / `normalized_email`. Writes an `admin_actions` audit row (`admin_identifier = 'system'`, `action_type = 'referral_self_block'`) on block so legitimate trips are reviewable. Note: the dedup-fields backfill for the non-bonus signup path lives in `app/api/auth/sync/route.ts` and is still uncommitted (tangled with Terminal A's email work).
 
-All four are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — safe to re-run.
+All are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — safe to re-run.
 
 ## Bonus economics (for reference)
 
 - $20 signup bonus, first 100 signups only (`bonus_config.signup_cap`), 14-day expiry
 - 3x wagering ($60 total volume required to unlock bonus_balance → cash)
 - Cash is always bet before bonus. Payouts routed proportionally by stake source.
-- At 3% house edge, expected cost per bonus user: ~$18 EV negative. Max aggregate loss: $1.8K (100 × $18). Acceptable CAC.
+- At ~9% house edge on $60 required wagering, expected house return ≈ $5.40 per bonus user. Net bonus cost ≈ $14.60 per user. Max aggregate loss ≈ $1.46K (100 × $14.60). Acceptable CAC.
 - Retention after bonus clears determines whether this is profitable. Track `bonus net cost` per user post-launch; tighten multiplier to 10x if trending above $25/user.
 
 ## MVP launch checklist — what still needs to be done
@@ -319,4 +410,13 @@ CRON_SECRET             # optional, protects /api/race/tick from public access
 
 # Launch mode
 NEXT_PUBLIC_IS_LIVE     # set to "true" to switch landing page from waitlist to live betting CTA
+
+# FingerprintJS Pro (for signup abuse detection — set in Vercel prod only, local dev no-ops)
+NEXT_PUBLIC_FINGERPRINT_PUBLIC_KEY   # from the "Public" tab on dashboard.fingerprint.com
+FINGERPRINT_SECRET_KEY                # from the "Server API" tab — used to verify visitor IDs server-side
+
+# Resend (transactional + retention emails — set in Vercel prod, optional locally)
+RESEND_API_KEY          # from resend.com/api-keys
+EMAIL_FROM              # optional, defaults to "throws.gg <no-reply@throws.gg>"
+EMAIL_REPLY_TO          # optional, defaults to "support@throws.gg"
 ```
