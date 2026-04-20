@@ -23,7 +23,7 @@ export function DepositPanel() {
   const walletAddress = solanaWallet?.address;
 
   // Monitor for incoming deposits
-  const { lastDeposit, checking, refresh } = useDepositMonitor(walletAddress || null);
+  const { lastDeposit, checking, refresh, foreignTokens } = useDepositMonitor(walletAddress || null);
 
   // Track when the deposit panel is viewed
   const trackedRef = useRef(false);
@@ -107,6 +107,29 @@ export function DepositPanel() {
               Balance updated automatically
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Foreign-SPL warning — user sent USDT / PYUSD / another SPL we don't credit */}
+      {foreignTokens.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3 space-y-1.5">
+          <p className="text-amber-400 text-sm font-semibold">
+            Unsupported token detected in your wallet
+          </p>
+          <p className="text-white/60 text-xs leading-relaxed">
+            We only accept <span className="font-mono text-white/80">USDC</span> and{" "}
+            <span className="font-mono text-white/80">SOL</span> on Solana. The following tokens arrived but have NOT been credited:
+          </p>
+          <ul className="text-white/70 text-xs font-mono pl-4 list-disc">
+            {foreignTokens.map((t) => (
+              <li key={t.mint}>
+                {t.amount} {t.symbol}
+              </li>
+            ))}
+          </ul>
+          <p className="text-white/40 text-[10px] leading-relaxed pt-1">
+            To recover these funds contact support — do not send more of the same token.
+          </p>
         </div>
       )}
 

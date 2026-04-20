@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRequest } from "@/lib/auth/verify-request";
-import { isValidSolanaAddress, sendUsdc } from "@/lib/wallet/send-usdc";
+import { isValidSolanaAddress, sendUsdc, checkSignatureStatus } from "@/lib/wallet/send-usdc";
 import { LIMITS, WITHDRAWAL_FEES } from "@/lib/game/constants";
 import { trackServer } from "@/lib/analytics/posthog-server";
 
@@ -49,7 +49,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!destinationAddress || !isValidSolanaAddress(destinationAddress)) {
+    if (!destinationAddress || typeof destinationAddress !== "string") {
+      return NextResponse.json(
+        { error: "Destination address required" },
+        { status: 400 }
+      );
+    }
+
+    const trimmedDest = destinationAddress.trim();
+
+    // Explicitly reject EVM-style addresses — clearest footgun
+    if (/^0x/i.test(trimmedDest)) {
+      return NextResponse.json(
+        {
+          error:
+            "That looks like an Ethereum address. throws.gg only sends USDC on Solana — paste a Solana wallet address.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidSolanaAddress(trimmedDest)) {
       return NextResponse.json(
         { error: "Invalid Solana wallet address" },
         { status: 400 }
@@ -128,6 +148,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Weekly withdrawal cap (MVP phase — $2k / rolling 7 days)
+    const sevenDaysAgo = new Date(
+      Date.now() - 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const { data: weekTxs } = await supabase
+      .from("transactions")
+      .select("amount, metadata")
+      .eq("user_id", user.dbUserId)
+      .eq("type", "withdrawal")
+      .in("status", ["pending", "confirmed"])
+      .gte("created_at", sevenDaysAgo);
+
+    const weeklyTotal = (weekTxs || []).reduce((sum, tx) => {
+      const meta = tx.metadata as { amount_usd?: number } | null;
+      const amt =
+        typeof meta?.amount_usd === "number"
+          ? meta.amount_usd
+          : Math.abs(parseFloat(String(tx.amount))) - WITHDRAWAL_FEES.USDC;
+      return sum + Math.max(0, amt);
+    }, 0);
+
+    if (weeklyTotal + amount > LIMITS.MAX_WEEKLY_WITHDRAWAL) {
+      const remaining = Math.max(
+        0,
+        LIMITS.MAX_WEEKLY_WITHDRAWAL - weeklyTotal
+      );
+      return NextResponse.json(
+        {
+          error: `Weekly withdrawal limit is $${LIMITS.MAX_WEEKLY_WITHDRAWAL.toFixed(0)} during the MVP phase. You have $${remaining.toFixed(2)} remaining this week.`,
+        },
+        { status: 429 }
+      );
+    }
+
     // --- Deduct balance atomically ---
     const { data: newBalance, error: balanceError } = await supabase.rpc(
       "update_balance",
@@ -136,7 +190,7 @@ export async function POST(request: NextRequest) {
         p_amount: -totalDeduction,
         p_type: "withdrawal",
         p_currency: "USD",
-        p_address: destinationAddress,
+        p_address: trimmedDest,
         p_metadata: {
           amount_usd: amount,
           fee_usd: fee,
@@ -159,7 +213,7 @@ export async function POST(request: NextRequest) {
       .select("id")
       .eq("user_id", user.dbUserId)
       .eq("type", "withdrawal")
-      .eq("address", destinationAddress)
+      .eq("address", trimmedDest)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
@@ -173,16 +227,13 @@ export async function POST(request: NextRequest) {
 
     // --- Auto-send for small amounts, queue for large ---
     if (amount <= AUTO_SEND_THRESHOLD) {
-      // Set to pending first — the update_balance function creates it as 'confirmed'
-      // so we need to track it differently. We'll attempt the on-chain send now.
-      try {
-        const txHash = await sendUsdc(destinationAddress, amount);
+      const sendResult = await sendUsdc(trimmedDest, amount);
 
-        // Mark as confirmed with tx hash
+      if (sendResult.status === "confirmed") {
         await supabase
           .from("transactions")
           .update({
-            tx_hash: txHash,
+            tx_hash: sendResult.signature,
             status: "confirmed",
             confirmed_at: new Date().toISOString(),
             metadata: {
@@ -200,23 +251,25 @@ export async function POST(request: NextRequest) {
           fee_usd: fee,
           currency: "USDC",
           chain: "solana",
-          tx_hash: txHash,
+          tx_hash: sendResult.signature,
           new_balance: parseFloat(newBalance),
           auto_sent: true,
-          wallet_address: destinationAddress,
+          wallet_address: trimmedDest,
         });
 
         return NextResponse.json({
           status: "completed",
           transactionId: txRecord.id,
-          txHash,
+          txHash: sendResult.signature,
           amount,
           fee,
           newBalance: parseFloat(newBalance),
         });
-      } catch (sendError) {
-        // On-chain send failed — refund the balance and mark as failed
-        console.error("Auto-send failed:", sendError);
+      }
+
+      if (sendResult.status === "not_submitted") {
+        // The tx never hit the network. Safe to refund in full.
+        console.error("Auto-send failed (not submitted):", sendResult.error);
 
         await supabase.rpc("update_balance", {
           p_user_id: user.dbUserId,
@@ -226,20 +279,32 @@ export async function POST(request: NextRequest) {
           p_metadata: {
             type: "withdrawal_refund",
             original_tx: txRecord.id,
+            reason: "tx_not_submitted",
+            error: sendResult.error,
           },
         });
 
         await supabase
           .from("transactions")
-          .update({ status: "failed" })
+          .update({
+            status: "failed",
+            metadata: {
+              amount_usd: amount,
+              fee_usd: fee,
+              currency: "USDC",
+              network: "solana",
+              error_type: "not_submitted",
+              error_message: sendResult.error,
+            },
+          })
           .eq("id", txRecord.id);
 
         trackServer(user.dbUserId, "withdrawal_failed", {
           amount_usd: amount,
           currency: "USDC",
           chain: "solana",
-          error_type: "on_chain_send_failed",
-          wallet_address: destinationAddress,
+          error_type: "not_submitted",
+          wallet_address: trimmedDest,
         });
 
         return NextResponse.json(
@@ -247,6 +312,155 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      // sendResult.status === "unknown" — the transaction was submitted but
+      // we lost confirmation. We MUST NOT auto-refund: the tx may have landed.
+      // Check the on-chain status first. If confirmed → keep the debit, mark
+      // success. If failed on chain → safe to refund. Otherwise → hold for
+      // manual review (admin will reconcile).
+      console.error("Auto-send uncertain — checking chain status:", {
+        signature: sendResult.signature,
+        error: sendResult.error,
+      });
+
+      // Wait a couple seconds before polling so the RPC has time to index.
+      // 3 polls × 2s gives the confirmation up to ~6s extra wall time.
+      let chainStatus: "confirmed" | "failed" | "unknown" = "unknown";
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        chainStatus = await checkSignatureStatus(sendResult.signature);
+        if (chainStatus !== "unknown") break;
+      }
+
+      if (chainStatus === "confirmed") {
+        // Tx landed — treat as success. Record the signature and keep the debit.
+        await supabase
+          .from("transactions")
+          .update({
+            tx_hash: sendResult.signature,
+            status: "confirmed",
+            confirmed_at: new Date().toISOString(),
+            metadata: {
+              amount_usd: amount,
+              fee_usd: fee,
+              currency: "USDC",
+              network: "solana",
+              auto_sent: true,
+              recovered_from_unknown: true,
+            },
+          })
+          .eq("id", txRecord.id);
+
+        trackServer(user.dbUserId, "withdrawal_completed", {
+          amount_usd: amount,
+          fee_usd: fee,
+          currency: "USDC",
+          chain: "solana",
+          tx_hash: sendResult.signature,
+          new_balance: parseFloat(newBalance),
+          auto_sent: true,
+          wallet_address: trimmedDest,
+          recovered_from_unknown: true,
+        });
+
+        return NextResponse.json({
+          status: "completed",
+          transactionId: txRecord.id,
+          txHash: sendResult.signature,
+          amount,
+          fee,
+          newBalance: parseFloat(newBalance),
+        });
+      }
+
+      if (chainStatus === "failed") {
+        // Tx was submitted but the chain rejected it. Safe to refund.
+        await supabase.rpc("update_balance", {
+          p_user_id: user.dbUserId,
+          p_amount: totalDeduction,
+          p_type: "deposit",
+          p_currency: "USD",
+          p_metadata: {
+            type: "withdrawal_refund",
+            original_tx: txRecord.id,
+            reason: "tx_failed_on_chain",
+            signature: sendResult.signature,
+          },
+        });
+
+        await supabase
+          .from("transactions")
+          .update({
+            status: "failed",
+            tx_hash: sendResult.signature,
+            metadata: {
+              amount_usd: amount,
+              fee_usd: fee,
+              currency: "USDC",
+              network: "solana",
+              error_type: "on_chain_failed",
+              error_message: sendResult.error,
+            },
+          })
+          .eq("id", txRecord.id);
+
+        trackServer(user.dbUserId, "withdrawal_failed", {
+          amount_usd: amount,
+          currency: "USDC",
+          chain: "solana",
+          error_type: "on_chain_failed",
+          wallet_address: trimmedDest,
+        });
+
+        return NextResponse.json(
+          { error: "Withdrawal failed — balance refunded. Please try again." },
+          { status: 500 }
+        );
+      }
+
+      // Still unknown after polling. The tx may or may not land. DO NOT
+      // refund. Flag as pending_review so the admin tool reconciles it
+      // before touching the balance either way.
+      await supabase
+        .from("transactions")
+        .update({
+          status: "pending",
+          tx_hash: sendResult.signature,
+          metadata: {
+            amount_usd: amount,
+            fee_usd: fee,
+            currency: "USDC",
+            network: "solana",
+            auto_sent: true,
+            pending_review: true,
+            reason: "confirmation_unknown",
+            error_message: sendResult.error,
+          },
+        })
+        .eq("id", txRecord.id);
+
+      trackServer(user.dbUserId, "withdrawal_held_for_review", {
+        amount_usd: amount,
+        fee_usd: fee,
+        currency: "USDC",
+        chain: "solana",
+        tx_hash: sendResult.signature,
+        reason: "confirmation_unknown",
+        wallet_address: trimmedDest,
+      });
+
+      return NextResponse.json({
+        status: "pending",
+        transactionId: txRecord.id,
+        txHash: sendResult.signature,
+        amount,
+        fee,
+        newBalance: parseFloat(newBalance),
+        message:
+          "Withdrawal submitted but confirmation is still pending. Your balance reflects the send. If the transaction doesn't appear in your wallet within 10 minutes, contact support with transaction ID " +
+          txRecord.id +
+          ".",
+      });
     }
 
     // Large withdrawal — set to pending for admin review
@@ -262,7 +476,7 @@ export async function POST(request: NextRequest) {
       chain: "solana",
       new_balance: parseFloat(newBalance),
       requires_review: true,
-      wallet_address: destinationAddress,
+      wallet_address: trimmedDest,
     });
 
     return NextResponse.json({

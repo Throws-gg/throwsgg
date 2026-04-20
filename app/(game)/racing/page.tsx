@@ -330,12 +330,19 @@ export default function RacingPage() {
       });
       const data = await res.json();
       if (res.ok && data.cancelled) {
-        // Remove from active bets and refund balance locally
+        // Remove from active bets and refund balance + bonus locally
         setActiveBets(prev => prev.filter(b => b.id !== betId));
-        if (typeof data.newBalance === "number") {
-          useUserStore.getState().setBalance(data.newBalance);
-        }
-        track("bet_cancelled", { bet_id: betId, refunded: data.refunded });
+        useUserStore.getState().setBonusState({
+          cashBalance: data.newBalance,
+          bonusBalance: data.bonusBalance,
+          wageringRemaining: data.wageringRemaining,
+        });
+        track("bet_cancelled", {
+          bet_id: betId,
+          refunded: data.refunded,
+          refund_to_cash: data.refundToCash,
+          refund_to_bonus: data.refundToBonus,
+        });
       }
     } catch { /* silent — next poll will reconcile */ }
   }, [userId, authedFetch]);

@@ -4,9 +4,19 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 
+export interface ForeignTokenBalance {
+  mint: string;
+  symbol: string;
+  amount: number;
+  rawAmount: string;
+  decimals: number;
+}
+
 /**
  * Polls the deposit API every 15 seconds to detect new deposits.
  * When new funds arrive on-chain, credits the user's game balance.
+ * Also surfaces any non-USDC SPL tokens detected in the wallet so the UI
+ * can warn the user before funds get stuck silently.
  */
 export function useDepositMonitor(walletAddress: string | null) {
   const userId = useUserStore((s) => s.userId);
@@ -15,6 +25,7 @@ export function useDepositMonitor(walletAddress: string | null) {
     amount: number;
     timestamp: number;
   } | null>(null);
+  const [foreignTokens, setForeignTokens] = useState<ForeignTokenBalance[]>([]);
   const [checking, setChecking] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -39,6 +50,10 @@ export function useDepositMonitor(walletAddress: string | null) {
           amount: data.credited,
           timestamp: Date.now(),
         });
+      }
+
+      if (Array.isArray(data.foreignTokens)) {
+        setForeignTokens(data.foreignTokens);
       }
     } catch {
       // Silently retry next interval
@@ -65,5 +80,5 @@ export function useDepositMonitor(walletAddress: string | null) {
     };
   }, [userId, walletAddress]);
 
-  return { lastDeposit, checking, refresh };
+  return { lastDeposit, checking, refresh, foreignTokens };
 }

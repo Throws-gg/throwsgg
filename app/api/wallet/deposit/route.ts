@@ -1,13 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getWalletBalances } from "@/lib/wallet/solana";
+import { getWalletBalances, getUsdcTransfersIn } from "@/lib/wallet/solana";
 import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 import { verifyRequest } from "@/lib/auth/verify-request";
 
 /**
  * POST /api/wallet/deposit
- * Check for new deposits by comparing on-chain balance vs last known balance.
- * If new funds detected, credit the user's game balance.
+ *
+ * Detect new on-chain deposits and credit the user's game balance.
+ *
+ * USDC path (per-signature dedup, race-safe):
+ *   1. Enumerate USDC transfer signatures to the user's ATA since the last
+ *      processed slot.
+ *   2. For each signature, call `update_balance` with `p_tx_hash = signature`.
+ *      A `UNIQUE` partial index on `transactions.tx_hash` turns a concurrent
+ *      retry into a constraint violation — credited exactly once.
+ *   3. Update `deposit_addresses.last_processed_slot` so the next call only
+ *      scans forward.
+ *
+ * SOL path (baseline-delta + row lock):
+ *   1. Lock the `deposit_addresses` row via select-for-update.
+ *   2. Credit `current_sol_usd - baseline_sol_usd` if positive.
+ *   3. Update `sol_baseline_lamports` to the current on-chain amount.
+ *
+ * Foreign (non-USDC) SPL tokens are never credited — see lib/wallet/solana.ts
+ * `getForeignTokenBalances()`. We surface a warning on the client instead.
  */
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
@@ -18,7 +35,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json();
     } catch {
-      // Body is optional — deposit checks derive everything from the DB user record.
+      // Body is optional.
     }
     const authed = await verifyRequest(request, body);
     if (!authed) {
@@ -41,129 +58,196 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get current on-chain balances
+    // Pull fresh on-chain balances — used for display + foreign-SPL detection.
     const balances = await getWalletBalances(walletAddress);
 
-    // Get or create the deposit tracking record
-    const { data: existing } = await supabase
+    if (balances.foreignTokens.length > 0) {
+      trackServer(userId, "deposit_foreign_token_detected", {
+        wallet_address: walletAddress,
+        tokens: balances.foreignTokens.map((t) => ({
+          symbol: t.symbol,
+          mint: t.mint,
+          amount: t.amount,
+        })),
+      });
+    }
+
+    // Ensure a deposit_addresses row exists. This is the per-user cursor for
+    // signature scanning + SOL baseline. First call initializes it.
+    const { data: existingAddr } = await supabase
       .from("deposit_addresses")
-      .select("*")
+      .select("last_processed_slot, sol_baseline_lamports")
       .eq("user_id", userId)
       .eq("chain", "solana")
       .single();
 
-    if (!existing) {
-      // First time — save the wallet address and current balances as baseline
+    if (!existingAddr) {
+      // First-time init — seed the cursor at the latest slot and the SOL
+      // baseline at the current on-chain amount. Anything already in the
+      // wallet BEFORE this point is NOT credited (user could have had
+      // incidental holdings from somewhere else).
+      const initialUsdcTransfers = await getUsdcTransfersIn(walletAddress, { limit: 1 });
+      const initialSlot = initialUsdcTransfers[0]?.slot ?? 0;
+
       await supabase.from("deposit_addresses").insert({
         user_id: userId,
         chain: "solana",
         address: walletAddress,
         derivation_index: 0,
-      });
-
-      // Store baseline in metadata
-      await supabase.from("transactions").insert({
-        user_id: userId,
-        type: "deposit",
-        amount: 0,
-        balance_after: 0,
-        currency: "USD",
-        status: "confirmed",
-        address: walletAddress,
-        metadata: {
-          type: "baseline",
-          sol_lamports: balances.solLamports,
-          usdc: balances.usdc,
-        },
+        last_processed_slot: initialSlot,
+        sol_baseline_lamports: balances.solLamports,
       });
 
       return NextResponse.json({
         status: "baseline_set",
         balances,
         credited: 0,
+        foreignTokens: balances.foreignTokens,
       });
     }
 
-    // Get the last known balances from the most recent deposit transaction
-    const { data: lastTx } = await supabase
-      .from("transactions")
-      .select("metadata")
-      .eq("user_id", userId)
-      .eq("type", "deposit")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    // --- USDC PATH: per-signature credit ---
+    const sinceSlot = existingAddr.last_processed_slot ?? 0;
+    const transfers = await getUsdcTransfersIn(walletAddress, { sinceSlot });
 
-    const lastSolLamports = (lastTx?.metadata as Record<string, number>)?.sol_lamports || 0;
-    const lastUsdc = (lastTx?.metadata as Record<string, number>)?.usdc || 0;
+    // Oldest first so the transactions ledger reflects chain order.
+    transfers.sort((a, b) => a.slot - b.slot);
 
-    // Calculate new deposits
-    const newUsdc = Math.max(0, balances.usdc - lastUsdc);
-    const newSolLamports = Math.max(0, balances.solLamports - lastSolLamports);
-    const newSolUsd = newSolLamports > 0
-      ? (balances.solUsd / (balances.solLamports || 1)) * newSolLamports
-      : 0;
+    let totalCreditedUsdc = 0;
+    let newMaxSlot = sinceSlot;
 
-    const totalNewUsd = newUsdc + newSolUsd;
+    for (const t of transfers) {
+      if (t.slot > newMaxSlot) newMaxSlot = t.slot;
+      if (t.uiAmount < 0.01) continue;
 
-    if (totalNewUsd < 0.01) {
+      try {
+        const { error } = await supabase.rpc("update_balance", {
+          p_user_id: userId,
+          p_amount: t.uiAmount,
+          p_type: "deposit",
+          p_currency: "USD",
+          p_address: walletAddress,
+          p_tx_hash: t.signature,
+          p_metadata: {
+            source: "usdc_transfer",
+            signature: t.signature,
+            slot: t.slot,
+            block_time: t.blockTime,
+            ui_amount: t.uiAmount,
+          },
+        });
+
+        if (error) {
+          // 23505 = unique_violation on tx_hash → already credited, skip.
+          if (error.code === "23505") continue;
+          console.error("update_balance (USDC deposit) failed:", {
+            signature: t.signature,
+            code: error.code,
+            message: error.message,
+          });
+          continue;
+        }
+
+        totalCreditedUsdc += t.uiAmount;
+      } catch (err) {
+        console.error("update_balance threw:", err);
+        continue;
+      }
+    }
+
+    // --- SOL PATH: row-locked baseline-delta ---
+    // The RPC below is a no-op if the baseline already matches current on-chain.
+    // If SOL has grown, credit the USD delta and bump the baseline.
+    let solCreditedUsd = 0;
+    const solDelta = balances.solLamports - (existingAddr.sol_baseline_lamports ?? 0);
+    if (solDelta > 0) {
+      const solUsdPerLamport = balances.solLamports > 0 ? balances.solUsd / balances.solLamports : 0;
+      const solUsd = solDelta * solUsdPerLamport;
+
+      // Row lock on the deposit_addresses row serialises concurrent requests.
+      // We use a single atomic UPDATE … RETURNING so two concurrent updaters
+      // race on the WHERE clause and only one wins.
+      const { data: claimed } = await supabase
+        .from("deposit_addresses")
+        .update({ sol_baseline_lamports: balances.solLamports })
+        .eq("user_id", userId)
+        .eq("chain", "solana")
+        .eq("sol_baseline_lamports", existingAddr.sol_baseline_lamports ?? 0)
+        .select("sol_baseline_lamports")
+        .single();
+
+      if (claimed && solUsd >= 0.01) {
+        const { error } = await supabase.rpc("update_balance", {
+          p_user_id: userId,
+          p_amount: solUsd,
+          p_type: "deposit",
+          p_currency: "USD",
+          p_address: walletAddress,
+          p_metadata: {
+            source: "sol_transfer",
+            lamports_delta: solDelta,
+            sol_usd: solUsd,
+            sol_baseline_lamports_after: balances.solLamports,
+          },
+        });
+        if (!error) {
+          solCreditedUsd = solUsd;
+        } else {
+          console.error("update_balance (SOL deposit) failed:", error);
+        }
+      }
+    }
+
+    // Bump the USDC cursor. Only do this AFTER the credits have landed so that
+    // a crash mid-loop leaves unprocessed signatures to retry on next poll.
+    if (newMaxSlot > sinceSlot) {
+      await supabase
+        .from("deposit_addresses")
+        .update({ last_processed_slot: newMaxSlot })
+        .eq("user_id", userId)
+        .eq("chain", "solana");
+    }
+
+    const totalCreditedUsd = totalCreditedUsdc + solCreditedUsd;
+
+    if (totalCreditedUsd < 0.01) {
       return NextResponse.json({
         status: "no_new_deposits",
         balances,
         credited: 0,
+        foreignTokens: balances.foreignTokens,
       });
     }
 
-    // Credit the user's game balance
-    const { data: newBalance, error: balanceError } = await supabase.rpc(
-      "update_balance",
-      {
-        p_user_id: userId,
-        p_amount: totalNewUsd,
-        p_type: "deposit",
-        p_currency: "USD",
-        p_address: walletAddress,
-        p_metadata: {
-          sol_lamports: balances.solLamports,
-          usdc: balances.usdc,
-          new_usdc: newUsdc,
-          new_sol_usd: newSolUsd,
-        },
-      }
-    );
+    // Fetch the post-credit balance for the UI.
+    const { data: postUser } = await supabase
+      .from("users")
+      .select("balance")
+      .eq("id", userId)
+      .single();
+    const newBalance = parseFloat(postUser?.balance ?? "0");
 
-    if (balanceError) {
-      trackServer(userId, "deposit_failed", {
-        amount_usd: totalNewUsd,
-        currency: newUsdc > 0 ? "USDC" : "SOL",
-        chain: "solana",
-        error_type: "balance_credit_failed",
-      });
-      return NextResponse.json({ error: "Failed to credit balance" }, { status: 500 });
-    }
-
-    // Check if this is the user's first deposit
-    const { data: depositCount } = await supabase
+    // First-deposit detection — used for analytics + future first-deposit bonuses.
+    const { count: depositCount } = await supabase
       .from("transactions")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("type", "deposit")
       .gt("amount", 0);
 
-    const isFirstDeposit = (depositCount as unknown as number) <= 1;
+    const isFirstDeposit = (depositCount ?? 0) <= transfers.length + (solCreditedUsd > 0 ? 1 : 0);
 
     trackServer(userId, "deposit_completed", {
-      amount_usd: totalNewUsd,
-      currency: newUsdc > 0 ? "USDC" : "SOL",
+      amount_usd: totalCreditedUsd,
+      usdc_credited: totalCreditedUsdc,
+      sol_credited_usd: solCreditedUsd,
       chain: "solana",
-      new_usdc: newUsdc,
-      new_sol_usd: newSolUsd,
-      new_balance: parseFloat(newBalance),
+      transfer_count: transfers.length,
+      new_balance: newBalance,
       is_first_deposit: isFirstDeposit,
       wallet_address: walletAddress,
     });
 
-    // Update user properties
     identifyServer(userId, {
       last_deposit_at: new Date().toISOString(),
       has_deposited: true,
@@ -171,9 +255,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "deposited",
-      credited: totalNewUsd,
+      credited: totalCreditedUsd,
       balances,
-      newBalance: parseFloat(newBalance),
+      newBalance,
+      foreignTokens: balances.foreignTokens,
     });
   } catch (error) {
     console.error("Deposit check error:", error);
@@ -182,13 +267,12 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * GET /api/wallet/deposit?userId=xxx&walletAddress=xxx
- * Get current on-chain balances without crediting.
+ * GET /api/wallet/deposit
+ * Return the caller's on-chain balances without crediting.
  */
 export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
 
-  // Auth: caller can only query their own linked deposit wallet.
   const authed = await verifyRequest(request);
   if (!authed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
