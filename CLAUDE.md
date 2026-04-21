@@ -234,6 +234,23 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal A (wallet UX fixes: daily-bonus deposit button + Privy onramp asset) — **PRE-PUSH**
+
+Two small but user-visible bugs on `/wallet` reported by Connor during smoke testing:
+
+**1. Daily bonus card "Deposit" button did nothing on `/wallet`.** The DailyBonusCard renders on both `/wallet` and `/profile`. Its "Deposit" unlock button was an `<a href="/wallet">` — on `/profile` that navigates correctly, but on `/wallet` it points to the current page so the user sees a flash/re-render with no apparent effect.
+
+- `components/bonus/DailyBonusCard.tsx` — new optional `onDepositClick` prop. When provided, the Deposit button renders as a `<button>` and calls it. When omitted (e.g. `/profile`), it falls back to `<a href="/wallet#deposit-panel">` so same-page ambiguity is impossible.
+- `app/(account)/wallet/page.tsx` — passes `onDepositClick` that does `setActiveTab("deposit")` then `requestAnimationFrame` + `scrollIntoView({ behavior: "smooth", block: "start" })` on the deposit panel anchor. Added `id="deposit-panel"` + `scroll-mt-20` to the deposit/withdraw toggle row so the scroll target clears the navbar.
+
+**2. Privy "Buy USDC" onramp defaulted to buying SOL.** `components/wallet/DepositPanel.tsx` was calling `fundWallet({ address })` on the Privy Solana hook. Privy's `SolanaFundingConfig` supports `options.asset: 'native-currency' | 'USDC'`; omitting it defaults to native (= SOL). The deposit panel's CTA literally says "Buy USDC" so this was a product-promise mismatch — and credit-wise it'd force the user through a Jupiter swap before they see funds because our deposit scanner expects USDC.
+
+- `components/wallet/DepositPanel.tsx` — `fundWallet({ address: walletAddress, options: { asset: "USDC" } })`. No Privy dashboard change needed; `asset` is a per-call hint.
+
+**Regional caveat to watch:** Privy's onramp providers (Moonpay/Transak) can silently fall back to SOL-only in some regions (UK sometimes, parts of EU) when USDC isn't supported by the provider for that buyer. If we see reports of purchases completing as SOL despite the hint, that's the onramp-provider side — not the hint. Workaround path is already live: buy SOL → deposit scanner credits SOL delta via the baseline flow in `app/api/wallet/deposit/route.ts`.
+
+**Smoke test:** on `/wallet` tap the Daily Bonus "Deposit" button → page should smooth-scroll to the deposit/withdraw toggle with Deposit tab active. Tap "Buy USDC" → Privy onramp modal should preselect USDC, not SOL.
+
 ### 2026-04-21 — Terminal A (Phase 4 follow-up: Google OAuth email capture) — **SHIPPED in `167d921`**
 
 **Bug** found during post-deploy smoke test: new Google signup via Privy never received the welcome email, and `users.email` was `NULL` for every Google OAuth user. Root cause in `components/layout/Providers.tsx:47` — it read `user.email?.address`, which Privy only populates for the email-login method. For Google OAuth, Privy stores the address at `user.google.email`. So `/api/auth/sync` received `email: null` and silently skipped both the `users.email` write AND the welcome send (guarded by `if (email)`).

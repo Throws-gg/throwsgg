@@ -37,7 +37,11 @@ export function DepositPanel() {
   const handleBuyWithCard = useCallback(() => {
     if (!walletAddress) return;
     track("deposit_buy_clicked", { method: "card", wallet_address: walletAddress });
-    fundWallet({ address: walletAddress });
+    // options.asset: "USDC" so the Privy onramp preselects USDC instead of
+    // defaulting to SOL (the chain's native asset). We settle game balance
+    // in USDC — a SOL purchase would force the user through a Jupiter swap
+    // first to get credited.
+    fundWallet({ address: walletAddress, options: { asset: "USDC" } });
   }, [walletAddress, fundWallet]);
 
   const handleCopyAddress = useCallback(() => {

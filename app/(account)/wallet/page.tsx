@@ -72,13 +72,28 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {userId && <DailyBonusCard />}
+        {userId && (
+          <DailyBonusCard
+            onDepositClick={() => {
+              setActiveTab("deposit");
+              // Defer the scroll until after React re-renders the deposit panel
+              requestAnimationFrame(() => {
+                document
+                  .getElementById("deposit-panel")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
+          />
+        )}
         {userId && <RakebackCard />}
 
         {userId ? (
           <>
             {/* Deposit / Withdraw toggle */}
-            <div className="flex rounded-xl bg-white/[0.03] border border-white/[0.06] p-1">
+            <div
+              id="deposit-panel"
+              className="flex rounded-xl bg-white/[0.03] border border-white/[0.06] p-1 scroll-mt-20"
+            >
               <button
                 onClick={() => setActiveTab("deposit")}
                 className={cn(

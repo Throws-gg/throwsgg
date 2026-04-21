@@ -51,7 +51,20 @@ function formatCountdown(nextClaimAt: string | null): string {
   return `${minutes}m`;
 }
 
-export function DailyBonusCard({ compact = false }: { compact?: boolean }) {
+export function DailyBonusCard({
+  compact = false,
+  onDepositClick,
+}: {
+  compact?: boolean;
+  /**
+   * Optional handler for the "Deposit" unlock button. When provided, the
+   * button renders as a <button> and calls this instead of navigating. Used
+   * on /wallet where the page already hosts the deposit panel — we switch
+   * tabs + scroll instead of a no-op self-link. Omit on pages like /profile
+   * where the button should navigate to /wallet.
+   */
+  onDepositClick?: () => void;
+}) {
   const authedFetch = useAuthedFetch();
   const userId = useUserStore((s) => s.userId);
   const setBonusState = useUserStore((s) => s.setBonusState);
@@ -192,12 +205,21 @@ export function DailyBonusCard({ compact = false }: { compact?: boolean }) {
               Claimed
             </button>
           ) : needsDeposit ? (
-            <a
-              href="/wallet"
-              className="px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white/80 text-sm font-semibold border border-white/10 transition-colors"
-            >
-              Deposit
-            </a>
+            onDepositClick ? (
+              <button
+                onClick={onDepositClick}
+                className="px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white/80 text-sm font-semibold border border-white/10 transition-colors"
+              >
+                Deposit
+              </button>
+            ) : (
+              <a
+                href="/wallet#deposit-panel"
+                className="px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white/80 text-sm font-semibold border border-white/10 transition-colors"
+              >
+                Deposit
+              </a>
+            )
           ) : (
             <button
               onClick={handleClaim}
