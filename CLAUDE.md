@@ -222,12 +222,11 @@ Research doc `swarm-research-for-launch/06-research-retention-mechanics.md` driv
 
 Phase order (each phase can be picked up by a fresh terminal; check the work log for status before starting):
 
-- **Phase 1 — Rakeback** (10–14h). Instant, tiered on `users.total_wagered`. 5/10/15/20/25% of edge at $0/$500/$5K/$25K/$100K lifetime. Accrue on each `settle_race` call. Claim endpoint + UI card on `/wallet`. Memory note `feedback_vip_rakeback.md` previously said "no rakeback at launch" — Connor reopened and approved for launch.
+- **Phase 1 — Rakeback** ✅ SHIPPED in `167d921`. User-claimed (not auto-swept), direct-to-balance (not bonus), no wagering requirement. Tiered 5/10/15/20/25% of edge on `users.total_wagered`. Migration 028 must be applied to prod — check work log entry.
 - **Phase 2 — FingerprintJS wiring** ✅ SHIPPED (see work log 2026-04-21).
-- **Phase 3 — Daily login bonus** (6–10h). Depends on Phase 2. Tier-scaled $0.10–$0.50 wager-locked (1×). Needs new `daily_claims` table + claim endpoint + UI.
-- **Phase 4 — Resend + email templates** (15–20h). Full retention-geared template set (see list below). Privy captures email on social login, so the address list already exists. New `lib/email/` with typed template system, domain verification on throws.gg (SPF/DKIM/DMARC). User preference page at `/settings`.
-  - Templates to build: welcome D0, first deposit confirmation, first bet placed, big win (>$50), bonus expiring D12, streak at risk, weekly cashback ready, rakeback ready, reactivation D7/D14/D30, withdrawal sent, withdrawal held for review, deposit received, weekly leaderboard result, RG monthly check-in.
-- **Phase 5 — Streaks + leaderboard wire-up** (20–28h). Login/bet streaks with freeze (Duolingo model). Replace the leaderboard stub at `app/(game)/leaderboard/page.tsx` (30-line placeholder) with a daily/weekly wager-race cron + snapshots table. Pool = % of prior period GGR.
+- **Phase 3 — Daily login bonus** ✅ SHIPPED in `030fb29`. Tiered $0.10–$1.00 into `bonus_balance` with 1× wagering. Ladder matches rakeback tiers.
+- **Phase 4 — Resend + email templates** ✅ SHIPPED in `efa8595` (infra + 14 templates + transactional wiring + preferences UI + unsubscribe + Resend webhook). Non-time-based retention templates (rakeback nudge shipped with Phase 1; BigWin/BonusExpiring/StreakAtRisk/Reactivation/etc. still need a sending cron — depends on Phase 5 backing systems).
+- **Phase 5 — Streaks + leaderboard wire-up** (20–28h) — **NEXT**. Login/bet streaks with freeze (Duolingo model). Replace the leaderboard stub at `app/(game)/leaderboard/page.tsx` (30-line placeholder) with a daily/weekly wager-race cron + snapshots table. Pool = % of prior period GGR. Unlocks the remaining email templates (WeeklyLeaderboardResult, StreakAtRisk).
 
 **Deferred past launch:** Lucky Spin, VIP tier UI, achievements, triggered deposit match, quests, cashback (bankroll too thin at 10% of losses — revisit once volume proven).
 
@@ -249,11 +248,11 @@ Append-only. Newest entries at the top. Keep bullets terse.
 
 **Smoke test:** log out, log back in with the same Google account that didn't receive a welcome. The lazy backfill should populate `users.email`, fire the welcome, and `email_log` should get a new row (category `lifecycle`, `idempotency_key = welcome:<userId>`).
 
-### 2026-04-21 — Terminal B (Phase 1 — Rakeback) **PRE-PUSH**
+### 2026-04-21 — Terminal B (Phase 1 — Rakeback) **SHIPPED TO PROD** (`167d921` on main)
 
 User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-based). Accumulates in `users.rakeback_claimable` until user clicks Claim — no auto-sweep, no wagering requirement, credits direct to `users.balance`. Safe because rakeback is generated only by real wagering which is already taxed by edge.
 
-**Migration 028_rakeback.sql** ⏳ NOT YET APPLIED — needs `psql` against prod Supabase before push is usable.
+**Migration 028_rakeback.sql** ⏳ check with Connor — the code is live on Vercel but migration 028 needs manual `psql` application. Until applied, `accrue_rakeback` / `claim_rakeback` RPCs are missing and settles will swallow the error silently (bets still settle, zero rakeback accrues). Apply with: `psql $DATABASE_URL < supabase/migrations/028_rakeback.sql` (safe to re-run).
 - `rakeback_accruals` ledger table (one row per settled bet, UNIQUE on `race_bet_id` — idempotent against settle retries).
 - `users.rakeback_claimable` + `rakeback_lifetime` + `last_rakeback_claim_at` + `last_rakeback_nudge_at` columns.
 - `rakeback_tier(total_wagered)` — IMMUTABLE, returns (tier, tier_pct). Ladder: Bronze 5% / Silver 10% / Gold 15% / Platinum 20% / Diamond 25% at $0 / $500 / $5K / $25K / $100K lifetime.
@@ -261,7 +260,7 @@ User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-ba
 - `claim_rakeback(user_id)` — atomic with `SELECT … FOR UPDATE` on user row. Drains claimable → balance, stamps `claimed_at` on the ledger, writes a `bonus` transaction with `metadata.source = 'rakeback_claim'`, bumps `rakeback_lifetime`. No minimum amount.
 - `settle_race` rewritten to call `accrue_rakeback` per bet (inside a BEGIN/EXCEPTION so a rakeback failure never blocks settlement).
 
-**Files (local only until push):**
+**Files (shipped in `167d921`):**
 - `lib/rakeback/tiers.ts` — TS mirror of the SQL tier ladder + edge rate + helpers (`getRakebackTier`, `getNextRakebackTier`).
 - `app/api/rakeback/status/route.ts` — GET, `verifyRequest()`, returns `{ tier, tierLabel, tierPct, effectivePct, claimable, lifetime, totalWagered, edgeRate, lastClaimAt, nextTier: {...} | null }`.
 - `app/api/rakeback/claim/route.ts` — POST, `verifyRequest()`, wraps `claim_rakeback` RPC. Fires PostHog `rakeback_claimed`. Returns `{ claimed, amount, newBalance, tier, lifetime }`.
@@ -269,7 +268,7 @@ User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-ba
 - `app/(account)/wallet/page.tsx` — mounted below `<DailyBonusCard />`.
 - `app/(account)/profile/page.tsx` — mounted between `<VipProgress />` and `<ReferralCard />` so the VIP progression visually leads into the claim action.
 
-**Weekly nudge cron** (live post-push):
+**Weekly nudge cron** (live):
 - `app/api/cron/rakeback-nudge/route.ts` — `verifyCron()`-protected. Finds users with `rakeback_claimable > 0` who haven't claimed or been nudged in 7+ days, AND have an email, AND aren't globally unsubscribed. Fires `RakebackReady` email via `retention` category (respects per-user preferences). Batched to 500/run. Idempotency key is `rakeback-nudge:{userId}:{iso-week}` so reruns in the same week hit the `email_log` dedup.
 - `vercel.json` — schedule `0 16 * * 0` (Sunday 16:00 UTC). Decent global time-of-day coverage for a weekly send.
 
@@ -278,10 +277,10 @@ User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-ba
 **Known pre-existing design mismatch** (flagging, not fixing in this pass):
 - `/profile` has its own `VIP_TIERS` array (`Bronze $0 / Silver $1K / Gold $10K / Platinum $50K / Diamond $250K`) which **does not match** the rakeback tier thresholds (`$0 / $500 / $5K / $25K / $100K`). The feedback memory says VIP should wrap rakeback as the headline benefit, so these two need to be unified. Leaving `/profile` VIP_TIERS alone for now so I don't step on whoever owns that component. Future cleanup: source both from `lib/rakeback/tiers.ts` and delete the `/profile` private ladder.
 
-**Operator pre-push checklist:**
-1. **Apply migration 028** to prod Supabase: `psql $DATABASE_URL < supabase/migrations/028_rakeback.sql`. Safe to re-run (CREATE OR REPLACE / IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+**Operator post-push checklist:**
+1. **Apply migration 028** to prod Supabase if not already done: `psql $DATABASE_URL < supabase/migrations/028_rakeback.sql`. Safe to re-run (CREATE OR REPLACE / IF NOT EXISTS / ADD COLUMN IF NOT EXISTS). **Without this, accrual silently no-ops.**
 2. No env vars to add.
-3. After push, verify:
+3. Verify:
    - `/wallet` page shows both DailyBonusCard and RakebackCard stacked.
    - `/profile` shows RakebackCard between VIP and Referral.
    - Place a bet, let it settle, refresh `/wallet` → RakebackCard `claimable` nonzero. Tier should be Bronze for a fresh account.
