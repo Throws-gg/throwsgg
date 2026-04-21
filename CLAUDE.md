@@ -292,9 +292,9 @@ User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-ba
 
 **Retention queue remaining:** Phase 5 (streaks + daily/weekly leaderboard). Phase 3 (daily login bonus) is already shipped to prod by Terminal A via `030fb29`. Once rakeback lands, the next clean unit of work is leaderboard wire-up.
 
-### 2026-04-21 — Terminal A (Phase 3 — Daily login bonus) **PRE-PUSH**
+### 2026-04-21 — Terminal A (Phase 3 — Daily login bonus) **SHIPPED TO PROD** (`030fb29` on main)
 
-Daily login bonus shipped locally end-to-end. Rides the existing `bonus_balance` / `wagering_remaining` rails from migrations 013 + 024 — no new balance concept. 1× wagering. Tier ladder mirrors rakeback (CLAUDE.md Phase 1) so users see one progression, not two.
+Daily login bonus live end-to-end. Rides the existing `bonus_balance` / `wagering_remaining` rails from migrations 013 + 024 — no new balance concept. 1× wagering. Tier ladder mirrors rakeback (Phase 1) so users see one progression, not two.
 
 **Migration 027_daily_login_bonus.sql** ✅ applied to prod by Connor.
 - `daily_claims` table (user_id, claimed_at, claim_date DATE, amount, wagering_added, tier, fingerprint_visitor_id, ip_address). Unique `(user_id, claim_date)` enforces one-per-UTC-day.
@@ -303,7 +303,7 @@ Daily login bonus shipped locally end-to-end. Rides the existing `bonus_balance`
 - `claim_daily_bonus(user_id, fingerprint, ip)` — atomic. Checks: banned, UTC-day dedup, ≥$5 cumulative confirmed deposits, 24h rolling fingerprint + IP dedup. Credits `bonus_balance` + `wagering_remaining` (1×). Extends `bonus_expires_at` to max(existing, NOW+14d). Logs `bonus` transaction with `metadata.source = 'daily_login_bonus'`.
 - `get_daily_bonus_status(user_id)` — read-only eligibility for the UI.
 
-**Files (local only until push):**
+**Files (all shipped in `030fb29`):**
 - `lib/bonus/daily.ts` — TS mirror of the SQL tier ladder, `getDailyBonusTier()` / `getNextDailyBonusTier()` helpers.
 - `app/api/bonus/daily/status/route.ts` — GET, `verifyRequest()`, returns `{ eligible, alreadyClaimedToday, amount, tier, tierLabel, nextClaimAt, depositRequired, currentDeposits, totalWagered }`.
 - `app/api/bonus/daily/claim/route.ts` — POST, `verifyRequest()`, server-verifies fingerprint via `verifyFingerprint()` (matches auth/sync pattern — untrusted/spoofed visitor IDs get nulled before hitting the RPC). Returns `{ granted, reason?, amount, tier, wageringAdded, nextClaimAt, user: { balance, bonusBalance, wageringRemaining, bonusExpiresAt } }`. Fires PostHog `daily_bonus_claimed` with tier, amount, fingerprint verification status.
@@ -326,7 +326,9 @@ Daily login bonus shipped locally end-to-end. Rides the existing `bonus_balance`
 
 **Tone update — `feedback_tone_of_voice.md` reversed:** Connor dialled back the full degen/meme tone to "confident + light personality, not meme-heavy". DailyBonusCard copy reflects this ("Claim" not "LFG your $0.20 is ready"). CLAUDE.md's "Degen tone" guideline is now stale — treat the memory as source of truth.
 
-**Next in retention queue:** Phase 1 (rakeback) is next per CLAUDE.md ordering. Connor approved rakeback AT launch (reversed the earlier "defer" memory) — `feedback_vip_rakeback.md` updated with the new tiered-instant design. VIP tier UI wraps rakeback as the headline benefit per tier.
+**Heads-up for next session:** `app/(account)/wallet/page.tsx` now imports `RakebackCard` (Phase 1 shipped separately in `167d921`). The daily-bonus card sits just above it.
+
+**Next in retention queue:** Phase 5 (streaks + daily/weekly leaderboard wire-up). Phase 1 rakeback already shipped in `167d921`. The remaining leaderboard stub is at `app/(game)/leaderboard/page.tsx`.
 
 ### 2026-04-21 — Terminal B + A bundle **SHIPPED TO PROD** (`efa8595` on main)
 
