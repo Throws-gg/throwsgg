@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/affiliate-payouts",
       "schedule": "5 0 * * 1"
+    },
+    {
+      "path": "/api/cron/rakeback-nudge",
+      "schedule": "0 16 * * 0"
     }
   ]
 }

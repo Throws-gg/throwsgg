@@ -6,6 +6,7 @@ import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { DepositPanel } from "@/components/wallet/DepositPanel";
 import { WithdrawPanel } from "@/components/wallet/WithdrawPanel";
 import { DailyBonusCard } from "@/components/bonus/DailyBonusCard";
+import { RakebackCard } from "@/components/bonus/RakebackCard";
 import { cn } from "@/lib/utils";
 
 interface Transaction {
@@ -72,6 +73,7 @@ export default function WalletPage() {
         </div>
 
         {userId && <DailyBonusCard />}
+        {userId && <RakebackCard />}
 
         {userId ? (
           <>

@@ -43,8 +43,24 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
       // Get FingerprintJS visitor ID (null if env var not set)
       const fingerprint = await getVisitorId();
 
-      // Extract the user's email from Privy if available
-      const email = user.email?.address || null;
+      // Extract the user's email from Privy. Privy stores it on different
+      // sub-objects per login method: `user.email` for email login, but
+      // `user.google.email` for Google OAuth, `user.linkedAccounts[]` as a
+      // catch-all. Check all of them so Google signups actually get emails.
+      const googleAccount = user.google as { email?: string } | undefined;
+      const linkedEmail = (user.linkedAccounts ?? [])
+        .map((a) => {
+          const acc = a as { type?: string; email?: string; address?: string };
+          if (acc.type === "email") return acc.address;
+          if (acc.type === "google_oauth") return acc.email;
+          return null;
+        })
+        .find((e) => typeof e === "string" && e.length > 0);
+      const email =
+        user.email?.address ||
+        googleAccount?.email ||
+        linkedEmail ||
+        null;
 
       // The Privy embedded Solana wallet — persisted server-side as the user's
       // deposit address. Write-once on the server (see /api/auth/sync).

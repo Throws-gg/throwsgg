@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { cn } from "@/lib/utils";
+import { RakebackCard } from "@/components/bonus/RakebackCard";
 
 // ======= VIP TIER SYSTEM =======
 
@@ -281,6 +282,9 @@ export default function ProfilePage() {
 
         {/* ===== VIP PROGRESS ===== */}
         <VipProgress totalWagered={totalWagered} />
+
+        {/* ===== RAKEBACK ===== */}
+        <RakebackCard />
 
         {/* ===== REFERRAL CARD ===== */}
         {referralCode && <ReferralCard code={referralCode} />}

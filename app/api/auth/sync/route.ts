@@ -92,6 +92,42 @@ export async function POST(request: NextRequest) {
           .is("wallet_address", null);
       }
 
+      // Lazy email backfill: Google OAuth users signed up before the email-
+      // plumbing fix have users.email = NULL. Capture it write-once so they
+      // start getting transactional + retention emails. normalized_email
+      // backfilled in the same update so the self-referral dedup (migration
+      // 025) covers them too.
+      if (!existing.email && email) {
+        const { data: normalised } = await supabase.rpc("normalize_email", {
+          raw_email: email,
+        });
+        await supabase
+          .from("users")
+          .update({ email, normalized_email: normalised })
+          .eq("id", existing.id)
+          .is("email", null);
+
+        // Fire the welcome one time for the backfilled user — they never got
+        // it. Idempotency key on userId means a retry of /auth/sync won't
+        // re-send, and the update-is-null above means this whole branch only
+        // runs once per user.
+        sendEmail({
+          to: email,
+          subject: "Welcome to throws.gg — your account is set up",
+          category: "lifecycle",
+          userId: existing.id,
+          idempotencyKey: `welcome:${existing.id}`,
+          react: Welcome({
+            username: existing.username,
+            bonusAmount: parseFloat(existing.bonus_balance || 0) || 20,
+            wageringRequired: parseFloat(existing.wagering_remaining || 0) || 60,
+            bonusExpiresAt: existing.bonus_expires_at ?? undefined,
+          }),
+        }).catch((err) =>
+          console.error("Backfill welcome email failed:", err)
+        );
+      }
+
       return NextResponse.json({
         user: {
           id: existing.id,

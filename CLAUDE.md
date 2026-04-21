@@ -235,6 +235,49 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal B (Phase 1 — Rakeback) **PRE-PUSH**
+
+User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-based). Accumulates in `users.rakeback_claimable` until user clicks Claim — no auto-sweep, no wagering requirement, credits direct to `users.balance`. Safe because rakeback is generated only by real wagering which is already taxed by edge.
+
+**Migration 028_rakeback.sql** ⏳ NOT YET APPLIED — needs `psql` against prod Supabase before push is usable.
+- `rakeback_accruals` ledger table (one row per settled bet, UNIQUE on `race_bet_id` — idempotent against settle retries).
+- `users.rakeback_claimable` + `rakeback_lifetime` + `last_rakeback_claim_at` + `last_rakeback_nudge_at` columns.
+- `rakeback_tier(total_wagered)` — IMMUTABLE, returns (tier, tier_pct). Ladder: Bronze 5% / Silver 10% / Gold 15% / Platinum 20% / Diamond 25% at $0 / $500 / $5K / $25K / $100K lifetime.
+- `accrue_rakeback(user_id, race_bet_id, stake)` — idempotent via unique violation. Writes ledger + bumps `rakeback_claimable`. Uses `EDGE_RATE = 0.0909` (matches OVERROUND = 1.10 — if overround changes, update both here and `lib/rakeback/tiers.ts`).
+- `claim_rakeback(user_id)` — atomic with `SELECT … FOR UPDATE` on user row. Drains claimable → balance, stamps `claimed_at` on the ledger, writes a `bonus` transaction with `metadata.source = 'rakeback_claim'`, bumps `rakeback_lifetime`. No minimum amount.
+- `settle_race` rewritten to call `accrue_rakeback` per bet (inside a BEGIN/EXCEPTION so a rakeback failure never blocks settlement).
+
+**Files (local only until push):**
+- `lib/rakeback/tiers.ts` — TS mirror of the SQL tier ladder + edge rate + helpers (`getRakebackTier`, `getNextRakebackTier`).
+- `app/api/rakeback/status/route.ts` — GET, `verifyRequest()`, returns `{ tier, tierLabel, tierPct, effectivePct, claimable, lifetime, totalWagered, edgeRate, lastClaimAt, nextTier: {...} | null }`.
+- `app/api/rakeback/claim/route.ts` — POST, `verifyRequest()`, wraps `claim_rakeback` RPC. Fires PostHog `rakeback_claimed`. Returns `{ claimed, amount, newBalance, tier, lifetime }`.
+- `components/bonus/RakebackCard.tsx` — cyan-gradient card matching DailyBonusCard's visual language. Tier badge, claimable amount, Claim button (disabled when 0), progress bar to next tier, lifetime total. No wagering copy — it's direct-to-balance.
+- `app/(account)/wallet/page.tsx` — mounted below `<DailyBonusCard />`.
+- `app/(account)/profile/page.tsx` — mounted between `<VipProgress />` and `<ReferralCard />` so the VIP progression visually leads into the claim action.
+
+**Weekly nudge cron** (live post-push):
+- `app/api/cron/rakeback-nudge/route.ts` — `verifyCron()`-protected. Finds users with `rakeback_claimable > 0` who haven't claimed or been nudged in 7+ days, AND have an email, AND aren't globally unsubscribed. Fires `RakebackReady` email via `retention` category (respects per-user preferences). Batched to 500/run. Idempotency key is `rakeback-nudge:{userId}:{iso-week}` so reruns in the same week hit the `email_log` dedup.
+- `vercel.json` — schedule `0 16 * * 0` (Sunday 16:00 UTC). Decent global time-of-day coverage for a weekly send.
+
+**Tone:** "confident + light personality" per the updated feedback memory. RakebackReady template reads "a cut of your wagering just hit claimable. no wagering requirement, no expiry." Not "LFG".
+
+**Known pre-existing design mismatch** (flagging, not fixing in this pass):
+- `/profile` has its own `VIP_TIERS` array (`Bronze $0 / Silver $1K / Gold $10K / Platinum $50K / Diamond $250K`) which **does not match** the rakeback tier thresholds (`$0 / $500 / $5K / $25K / $100K`). The feedback memory says VIP should wrap rakeback as the headline benefit, so these two need to be unified. Leaving `/profile` VIP_TIERS alone for now so I don't step on whoever owns that component. Future cleanup: source both from `lib/rakeback/tiers.ts` and delete the `/profile` private ladder.
+
+**Operator pre-push checklist:**
+1. **Apply migration 028** to prod Supabase: `psql $DATABASE_URL < supabase/migrations/028_rakeback.sql`. Safe to re-run (CREATE OR REPLACE / IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+2. No env vars to add.
+3. After push, verify:
+   - `/wallet` page shows both DailyBonusCard and RakebackCard stacked.
+   - `/profile` shows RakebackCard between VIP and Referral.
+   - Place a bet, let it settle, refresh `/wallet` → RakebackCard `claimable` nonzero. Tier should be Bronze for a fresh account.
+   - Click Claim → balance jumps by the claimable amount, card shows `+$X.XX added to your balance.` flash, lifetime updates. PostHog fires `rakeback_claimed`.
+   - `transactions` table has the `bonus` row with `metadata.source = 'rakeback_claim'`.
+   - `rakeback_accruals` table has one row per bet settled, `claimed_at` stamped after claim.
+4. Nudge cron: can test manually with `curl -H "Authorization: Bearer $CRON_SECRET" https://throws.gg/api/cron/rakeback-nudge`. Returns `{ nudged, skipped, candidates }`. Should only email users who've sat on rakeback >7 days.
+
+**Retention queue remaining:** Phase 5 (streaks + daily/weekly leaderboard). Phase 3 (daily login bonus) is already shipped to prod by Terminal A via `030fb29`. Once rakeback lands, the next clean unit of work is leaderboard wire-up.
+
 ### 2026-04-21 — Terminal A (Phase 3 — Daily login bonus) **PRE-PUSH**
 
 Daily login bonus shipped locally end-to-end. Rides the existing `bonus_balance` / `wagering_remaining` rails from migrations 013 + 024 — no new balance concept. 1× wagering. Tier ladder mirrors rakeback (CLAUDE.md Phase 1) so users see one progression, not two.
