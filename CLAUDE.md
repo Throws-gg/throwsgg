@@ -235,38 +235,58 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
-### 2026-04-21 — Terminal B (deferred security hardening — LOCAL ONLY, PRE-PUSH)
+### 2026-04-21 — Terminal B + A bundle **SHIPPED TO PROD** (`efa8595` on main)
 
-Followed up on the four deferred items from `SECURITY_AUDIT_2026-04-20.md` §7 that were within launch-window scope. Nothing committed yet — Connor to review locally first. No migrations.
+Pushed a single bundle containing Terminal B's deferred security hardening AND Terminal A's full Phase 4 Resend email bundle (was sitting pre-push, tangled in the same files — shipping together resolved the tangle). Also swept up two other pre-push changes that were already in the working tree: odds overround 1.042→1.10 and WithdrawPanel Solana-only client guard.
 
-**Shipped locally:**
+**Security hardening (audit §7 deferred items):**
+- **I3** — `next.config.ts`: `X-Frame-Options: DENY` (kills `/wallet` clickjacking), HSTS 2y+preload, Referrer-Policy, Permissions-Policy, X-Content-Type-Options, CSP **Report-Only** (allowlist covers Privy / PostHog / Supabase / Solana RPCs / Fingerprint / Resend). Watch the violation reports for a few days before promoting to enforcing.
+- **I4** — `lib/analytics/posthog-server.ts` central `scrubProperties`: `wallet_address` → `wallet_hash` (SHA-256, 16 hex), `tx_hash` dropped, raw balance fields (`new_balance` / `current_balance` / `total_wagered` etc.) → `*_tier` buckets. Call sites didn't need edits. Client `identify()` in `Providers.tsx` also tiered.
+- **I6** — `Providers.tsx` Privy `loginMethods: ["email", "google"]` (dropped `"wallet"`, removes Metamask/EVM signin footgun). Ethereum embedded wallet config removed.
+- **W4** — `lib/wallet/send-usdc.ts` gained `getHotWalletSolBalance()` + `HOT_WALLET_SOL_FLOOR = 0.01`. Auto-send path in `/api/wallet/withdraw` pre-flights SOL before `update_balance`; if low, returns 503 + writes `admin_actions` row (`action_type = 'hot_wallet_low_sol'`) instead of opaque post-debit refund. Large-withdrawal path skips this (admin initiates send).
 
-1. **I3 — Security headers.** `next.config.ts` now adds `X-Frame-Options: DENY` (kills the `/wallet` clickjacking vector — scariest remaining issue), HSTS (2y + preload), Referrer-Policy, Permissions-Policy, X-Content-Type-Options, plus CSP in **Report-Only** mode (enforcing `frame-ancestors 'none'` still via the X-Frame-Options header). CSP allowlist covers Privy, PostHog, Supabase realtime, Solana RPCs, Fingerprint, Resend. Ship as report-only first — watch the violation endpoint for a few days before promoting to enforcing.
+**Phase 4 Resend email bundle (Terminal A):**
+- `lib/email/`: Resend client, typed `send.ts`, 14 templates (Welcome, DepositReceived, WithdrawalSent, FirstDepositNudge, FirstBetPlaced, BigWin, BonusExpiring, StreakAtRisk, WeeklyCashbackReady, RakebackReady, Reactivation D7/D14/D30, WeeklyLeaderboardResult, RGMonthlyCheckin), shared `_layout`, HMAC unsubscribe tokens (`ADMIN_SESSION_SALT`-keyed).
+- Transactional wiring live: `auth/sync` → Welcome, `wallet/deposit` → DepositReceived, `wallet/withdraw` → WithdrawalSent (confirmed + recovered_from_unknown paths). All idempotent-keyed.
+- `/api/user/email-preferences` GET/POST, `/settings` per-category UI, `/unsubscribe` one-tap + `/api/unsubscribe` POST (Gmail/Yahoo one-click compliance).
+- `/api/webhooks/resend` — Svix-signed, fail-closed in prod. Writes open/click/bounce/complaint timestamps to `email_log`. Spam complaints auto-trigger global unsubscribe.
+- `auth/sync` now also backfills `signup_fingerprint` / `signup_ip` / `normalized_email` on every signup — closes the migration 025 self-referral block gap for non-bonused signups.
 
-2. **I4 — PostHog PII scrub.** `lib/analytics/posthog-server.ts` now runs every `trackServer` / `identifyServer` call through a `scrubProperties` pass: `wallet_address` → `wallet_hash` (SHA-256 first 16 hex), `destination_address` → `destination_hash`, `tx_hash` → dropped, raw balance fields (`new_balance`, `current_balance`, `total_wagered`, etc.) → `*_tier` buckets (`zero` / `under_10` / `under_100` / `under_1k` / `under_10k` / `over_10k`). Call sites (`withdraw`, `deposit`, `auth/sync`) didn't need edits — the helper handles it centrally. Also tiered the client-side `identify()` in `Providers.tsx` (raw `current_balance` / `total_wagered` etc. were going out on every auth sync).
+**Other swept-in changes:**
+- `lib/racing/odds-engine.ts` — `OVERROUND 1.042 → 1.10` (~9% edge, virtual-sports category band, $10K bankroll headroom at 480 races/day).
+- `components/wallet/WithdrawPanel.tsx` — client-side Solana-only address guard (inline `0x...` rejection, base58 check).
+- `.gitignore` — added `video/` (710MB Remotion project was untracked).
 
-3. **I6 — Privy `loginMethods` tightened to Solana-only.** Dropped `"wallet"` from `loginMethods` in `Providers.tsx` (removes the Metamask/EVM signin footgun). Also dropped the Ethereum embedded wallet config — we never use it. Now just `["email", "google"]` with a Solana embedded wallet auto-created on login.
+**Env vars now required in Vercel prod (before full functionality):**
+- `RESEND_API_KEY` — from resend.com/api-keys. Without it, emails silently no-op (safe).
+- `RESEND_WEBHOOK_SECRET` — from Resend dashboard once endpoint added. Without it, webhook 401s (safe).
+- `NEXT_PUBLIC_APP_URL` — optional, defaults `https://throws.gg`. Only matters for preview envs.
+- `EMAIL_FROM` / `EMAIL_REPLY_TO` — optional, defaults documented below.
+- `NEXT_PUBLIC_FINGERPRINT_PUBLIC_KEY` + `FINGERPRINT_SECRET_KEY` — already set per earlier entries.
 
-4. **W4 — Hot wallet SOL floor check.** `lib/wallet/send-usdc.ts` gained `getHotWalletSolBalance()` + exported `HOT_WALLET_SOL_FLOOR = 0.01`. `app/api/wallet/withdraw/route.ts` pre-flights SOL balance on the auto-send path **before** `update_balance` runs — if below floor, returns 503 "withdrawals temporarily paused" and writes an `admin_actions` row (`action_type = 'hot_wallet_low_sol'`) so it shows up in the admin audit feed. Previously the user's balance would debit, then `getOrCreateAssociatedTokenAccount` would throw, the `not_submitted` branch would refund — correct but opaque, and an ATA-grief attacker could keep spinning the cycle until real users started seeing failed withdrawals. Large-withdrawal path (>$100) skips this check because admin initiates the send manually.
+**Operator post-push checklist:**
+1. Verify `throws.gg` sending domain in Resend (SPF/DKIM/DMARC DNS).
+2. Add `https://throws.gg/api/webhooks/resend` endpoint in Resend subscribed to `email.opened/clicked/bounced/complained`. Copy signing secret → `RESEND_WEBHOOK_SECRET` in Vercel.
+3. Set `RESEND_API_KEY` in Vercel.
+4. Smoke test: signup → welcome email; deposit $1 → deposit email; withdraw $5 → withdrawal email; footer unsub link → `/settings` amber banner → resubscribe clears.
+5. PostHog sanity: new withdrawal event should show `wallet_hash` (not `wallet_address`), `new_balance_tier` (not `new_balance`), no `tx_hash` property. Privy login modal should list only Email + Google.
+6. Browser devtools on `/`: `X-Frame-Options: DENY` + `Content-Security-Policy-Report-Only` headers present.
 
-**Typecheck:** `npx tsc --noEmit` → 0 errors.
+**Still deferred past launch** (not pre-launch-critical, from audit §7):
+- I5 structured logging (`console.error(err)` paths could leak hot-wallet key bytes in Vercel logs if a future debug session logs a raw Error).
+- A7 admin login distributed rate-limit (in-memory per-lambda defeatable, bar is high).
+- A8 admin CSRF token (sameSite=lax mostly sufficient for our setup).
+- A9 default-auth middleware on `/api/**` (structural fix to prevent future forgotten-`verifyRequest` regressions).
 
-**Deferred past launch** (still open from audit §7, not pre-launch-critical):
-- I5 structured logging / error-scrubbing (console.error paths could leak hot-wallet key bytes in Vercel logs if a future debug session logs a raw Error object)
-- A7 admin login distributed rate-limit (in-memory per-lambda is defeatable but bar is high)
-- A8 admin CSRF token (sameSite=lax is mostly sufficient for our setup)
-- A9 default-auth middleware on `/api/**` (structural fix to prevent future forgotten-verifyRequest regressions)
+**Not-yet-wired email templates** (templates exist, no backing system yet): BigWin, BonusExpiring, StreakAtRisk, WeeklyCashbackReady, RakebackReady, Reactivation D7/D14/D30, WeeklyLeaderboardResult, RGMonthlyCheckin — all depend on Phase 1/3/5 (rakeback, streaks, leaderboard, cashback) which are un-started. Cron-driven sweep endpoint deferred with them.
 
-**Operator pre-push checklist for this batch:**
-1. No env vars to add. No migrations. Pure code.
-2. Deploy to Vercel, then check a few pages in browser devtools:
-   - Network tab shows `Content-Security-Policy-Report-Only` and `X-Frame-Options: DENY` on `/`, `/racing`, `/wallet`.
-   - Privy login modal still lists only "Email" and "Google" (no "Connect Wallet" option).
-   - After login, a deposit or withdrawal event in PostHog shows `wallet_hash` not `wallet_address`, `new_balance_tier` not `new_balance`, no `tx_hash` property.
-3. To test W4 locally: temporarily lower `HOT_WALLET_SOL_FLOOR` to something above your wallet balance, hit withdraw, confirm 503 + admin_actions row with `action_type='hot_wallet_low_sol'`. Revert.
-4. Suggest **admin UI tab for `admin_actions WHERE action_type='hot_wallet_low_sol'`** so a top-up alert surfaces without needing to query the DB directly — can ship post-launch.
+**Next available work** (any terminal can pick up — no tangles):
+- Retention Phase 1 (rakeback, 10–14h).
+- Retention Phase 3 (daily login bonus, 6–10h — depends on Phase 2, already shipped).
+- Retention Phase 5 (streaks + leaderboard wire-up, 20–28h).
+- Admin UI tab for `admin_actions WHERE action_type='hot_wallet_low_sol'` (hot-wallet top-up alert surfacer).
 
-### 2026-04-21 — Terminal A (Phase 4 Resend emails — full bundle, PRE-PUSH)
+### 2026-04-21 — Terminal A (Phase 4 Resend emails — full bundle — superseded by `efa8595`)
 
 Built on top of the earlier Phase 4 scaffolding. Migration 026 was applied by Connor. Everything below is local only — nothing pushed yet.
 
