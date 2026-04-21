@@ -235,6 +235,20 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal A (Phase 4 follow-up: Google OAuth email capture) — **SHIPPED in `167d921`**
+
+**Bug** found during post-deploy smoke test: new Google signup via Privy never received the welcome email, and `users.email` was `NULL` for every Google OAuth user. Root cause in `components/layout/Providers.tsx:47` — it read `user.email?.address`, which Privy only populates for the email-login method. For Google OAuth, Privy stores the address at `user.google.email`. So `/api/auth/sync` received `email: null` and silently skipped both the `users.email` write AND the welcome send (guarded by `if (email)`).
+
+**Fix shipped** in `167d921` (same commit as Phase 1 rakeback — piggybacked since Connor was pushing):
+- `components/layout/Providers.tsx` — email now resolves via fallthrough `user.email?.address → user.google?.email → user.linkedAccounts[]` (matches `type === "email"` → `.address`, `type === "google_oauth"` → `.email`). Covers current login methods and future-proofs Apple/Twitter/etc.
+- `app/api/auth/sync/route.ts` — lazy email backfill on the `existing` (returning-user) branch. If `users.email IS NULL` and the sync request carries an email, write it (plus `normalized_email` via the `normalize_email` RPC) write-once, then fire the welcome with idempotency key `welcome:<userId>`. The update is gated on `.is("email", null)` so it only ever runs once per user. Any Google user who signed up pre-fix gets their email captured + a welcome on their next page load.
+
+**Why write-once matters:** `.is("email", null)` means a user can't change their Privy email later and have us overwrite what we stored (stops an attacker with a hijacked Privy account from swapping the email on our side). Same pattern as the existing `wallet_address` backfill above it.
+
+**No new env vars. No new migrations. No Resend config changes.**
+
+**Smoke test:** log out, log back in with the same Google account that didn't receive a welcome. The lazy backfill should populate `users.email`, fire the welcome, and `email_log` should get a new row (category `lifecycle`, `idempotency_key = welcome:<userId>`).
+
 ### 2026-04-21 — Terminal B (Phase 1 — Rakeback) **PRE-PUSH**
 
 User-claimed rakeback. Accrues on every settled bet (stake-based, not outcome-based). Accumulates in `users.rakeback_claimable` until user clicks Claim — no auto-sweep, no wagering requirement, credits direct to `users.balance`. Safe because rakeback is generated only by real wagering which is already taxed by edge.
