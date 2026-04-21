@@ -234,6 +234,49 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal B (geo-blocking) **PRE-PUSH**
+
+Jurisdictional geo-block middleware. Sourced from `swarm-research-for-launch/25-geoblock-jurisdictions.md` §1A–1C. Ships the P0 middleware-only subset — IPQS VPN detection, Chainalysis sanctions screening, age-gate modal, dedicated `compliance_geo_blocks` table all remain deferred (per Connor's call: unlicensed soft-launch, add them when we have an Anjouan licence to protect).
+
+**Not blocking AU for launch.** Connor is in AU pre-launch for testing. He'll add `AU` to `BLOCKED_COUNTRIES` in `lib/geo/blocklist.ts` in a one-line change when he relocates to Bali. Flagged inline in the file as a reminder.
+
+**Files (local only until push):**
+- `lib/geo/blocklist.ts` — single source of truth for the blocklist. Country set (US, GB, FR, NL, CW, ES, IT, DE, BE, PT, DK, SE, CH, SG, HK, TR, IL, PL, CZ + sanctions IR/KP/SY/CU/RU/BY/MM/SD/SS/ZW/VE/AF), US state set (WA/NV/NY/CT/NJ/PA/MI/WV/DE/TN/LA/ID/UT/HI — defence-in-depth; redundant while country-level US is blocked), UA occupied oblasts (Crimea/Luhansk/Donetsk), CA-ON. Pure `decideGeoBlock(country, region)` helper — easy to unit-test if we add tests later.
+- `middleware.ts` — extended to run geo-block BEFORE admin auth. Uses `x-vercel-ip-country` / `x-vercel-ip-country-region` headers (Next.js 16 deprecated `req.geo`). Fails closed on missing/bad geo. Returns HTTP 451 "Unavailable for Legal Reasons" — rewrite to `/blocked` for HTML requests (preserves URL for auditors), JSON 451 for API routes. Dev mode (`NODE_ENV !== "production"`) skips geo entirely. Matcher expanded from `/admin/*` + `/api/admin/*` to everything-except-Next-statics, with an in-handler exempt list for `/_next/`, `/assets/`, `/api/cron/`, `/api/internal/`, `/api/webhooks/` (Resend), `/api/unsubscribe` (email one-click), `/api/geo-bypass`, `/blocked`, `/favicon*`.
+- `app/blocked/page.tsx` — neutral compliance page. Shows detected country (named, not ISO code), Anjouan licence note, `compliance@throws.gg` appeals email, `support@throws.gg` for withdrawal help, RG helpline links (BeGambleAware / NCPG / Gambling Help Online). Explicitly does NOT suggest VPN. Timestamp embedded for dispute records. `robots: noindex/nofollow`.
+- `app/api/geo-bypass/route.ts` — founder bypass. `GET /api/geo-bypass?key=<GEO_BYPASS_SECRET>` validates with constant-time compare, sets an HttpOnly 24h bypass cookie, redirects home. Lets Connor hit prod from AU (once AU is blocked) or any "Vercel got my geo wrong" edge case. Cookie is per-browser so Connor's phone and laptop both need a one-time visit.
+- `app/api/internal/log-geo-block/route.ts` — receives fire-and-forget POSTs from the edge middleware (Edge Runtime can't call Supabase directly). Writes a row to `admin_actions` (`action_type='geo_block'`, `admin_identifier='geo-block'`) with `{reason, country, region, path, ua, referrer, ip}` in `after_value`. Authed via constant-time compare on `INTERNAL_GEO_LOG_SECRET` header. If secret isn't set, silently skips logging (fail-open for the log, fail-closed for the block itself).
+
+**No `compliance_geo_blocks` dedicated table yet** — reusing `admin_actions` keeps this migration-free. Research doc §4C calls for a proper table with 5-year retention; `admin_actions` inherits that retention for free (we never delete from it). Upgrade path when needed: write a migration that `INSERT INTO compliance_geo_blocks SELECT … FROM admin_actions WHERE action_type='geo_block'` and flip the logger to write there instead.
+
+**New env vars required in Vercel prod:**
+- `GEO_BYPASS_SECRET` — random ≥20 chars. Without it, `/api/geo-bypass` returns 503 so the founder has no way to unblock themselves if accidentally geo-blocked. **Set before push** or you might lock yourself out if Vercel misidentifies your geo.
+- `INTERNAL_GEO_LOG_SECRET` — random ≥20 chars. Without it, geo-block still works but the admin_actions log doesn't populate. Optional but recommended — the audit trail is cheap insurance.
+
+**What's deliberately not shipped** (per Connor's decision, logged here so no one re-opens it without conversation):
+- **Age-gate modal.** "Security theatre without real verification — adds friction without value pre-licence. Revisit when we apply for a licence."
+- **Profanity filter on chat.** "We're all adults here. Users should feel free. Revisit if it becomes a moderation load."
+- **IPQS VPN/proxy detection** ($99/mo + integration). Post-launch — Anjouan licence application trigger.
+- **Chainalysis sanctions screening on deposits.** Post-launch — Anjouan licence application trigger.
+
+**Operator pre-push checklist:**
+1. Set `GEO_BYPASS_SECRET` in Vercel prod (e.g. `openssl rand -hex 24`). **Do this BEFORE pushing** so you can `GET /api/geo-bypass?key=<SECRET>` on your first prod visit if Vercel tags your AU IP wrong.
+2. Set `INTERNAL_GEO_LOG_SECRET` in Vercel prod (same pattern, random ≥20 chars). Optional — geo-block runs without it, just no audit logging.
+3. No migrations.
+4. After push:
+   - From AU (you): hit `/` — should load normally (AU not in blocklist).
+   - Switch browser geo via VPN to US: hit `/` — should rewrite to `/blocked` with `?c=US&r=country`. URL bar still shows `/` (the rewrite preserves it).
+   - `/api/race/state` from the VPN session: should return JSON 451.
+   - Hit `/api/geo-bypass?key=<your SECRET>` from the VPN session — redirects home, cookie set, future requests bypass geo.
+   - Check `admin_actions` table: new rows with `action_type='geo_block'` should appear for each blocked attempt.
+5. `/blocked` should be reachable from anywhere (Resend bots, search crawlers, etc.) — confirm by hitting it directly.
+6. Vercel cron paths (`/api/race/tick`, `/api/cron/*`) must still succeed — confirm via Vercel dashboard → Logs → filter by cron. If you see 451s on crons, the exempt list in middleware.ts is wrong.
+
+**Known gotchas:**
+- If Vercel's geo detection is down (header absent), `decideGeoBlock` treats that as `geo_unknown` and blocks. This is the "fail closed" posture the research doc specifies. If users start reporting legitimate blocks after Vercel has an incident, temporarily flip `GEO_EXEMPT_PREFIXES` to add `/` or put the bypass cookie across all users via a hotfix.
+- The CSP in `next.config.ts` has `connect-src 'self' …` — the middleware's internal fetch to `/api/internal/log-geo-block` is same-origin so no CSP edit needed. Double-checked.
+- Edge Runtime doesn't have `waitUntil` in the middleware signature as of Next 16.2 — the logging fetch is fire-and-forget with `keepalive: true` instead. If we need guaranteed delivery later, move logging to a downstream handler in the app router.
+
 ### 2026-04-21 — Terminal A (wallet UX fixes: daily-bonus deposit button + Privy onramp asset) — **PRE-PUSH**
 
 Two small but user-visible bugs on `/wallet` reported by Connor during smoke testing:
@@ -571,9 +614,8 @@ All are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — saf
 ### NOT doing before launch (accepted risk)
 
 - ANTHROPIC_API_KEY — commentary is nice-to-have, settle flow has try/catch fallback
-- Profanity filter — empty BLOCKED_WORDS array in chat/send, will populate post-launch
-- Age gate (18+) — defer to post-launch
-- Geo-blocking (US, UK, AU, FR, NL) — defer to post-launch
+- Profanity filter — Connor's call 2026-04-21: "We're all adults here. Users should feel free." Revisit if moderation load demands it.
+- Age gate (18+) — Connor's call 2026-04-21: "Security theatre without real verification — clicking Yes I'm over 18 means nothing. Revisit when we apply for a licence."
 - Error tracking (Sentry) — console only for now
 - Privacy policy — post-launch
 - Email notifications — post-launch
@@ -588,8 +630,9 @@ All are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — saf
 - Win card one-tap share to X — RaceWinCard component exists, verify share flow
 - Telegram Mini-App — Future distribution channel for restricted markets
 - Privacy policy page
-- Geo-blocking implementation
-- Age gate modal
+- Age gate modal (when licence application begins)
+- IPQS VPN/proxy detection (post-launch, pairs with licence application)
+- Chainalysis sanctions screening on deposits (post-launch, pairs with licence application)
 
 ## Coding guidelines
 
@@ -639,4 +682,8 @@ RESEND_WEBHOOK_SECRET    # from Resend dashboard once webhook endpoint configure
 EMAIL_FROM               # optional, defaults to "throws.gg <no-reply@throws.gg>"
 EMAIL_REPLY_TO           # optional, defaults to "support@throws.gg"
 NEXT_PUBLIC_APP_URL      # optional; base for unsubscribe links, defaults to https://throws.gg
+
+# Geo-blocking (jurisdictional compliance — set in Vercel prod)
+GEO_BYPASS_SECRET         # random ≥20 chars. Without it, /api/geo-bypass returns 503 — set BEFORE push or risk locking yourself out if Vercel misidentifies your IP.
+INTERNAL_GEO_LOG_SECRET   # random ≥20 chars. Without it, geo-block still works but audit logging to admin_actions doesn't fire. Optional but recommended.
 ```
