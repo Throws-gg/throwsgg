@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthToken, isDevMode } from "@/lib/auth/privy";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
+import { verifyFingerprint } from "@/lib/fingerprint/server";
+import { sendEmail } from "@/lib/email/send";
+import Welcome from "@/lib/email/templates/Welcome";
 
 interface SignupBonusResult {
   granted: boolean;
@@ -140,6 +143,7 @@ export async function POST(request: NextRequest) {
         referral_code: newCode,
         referrer_id: referrerId,
         wallet_address: solanaAddress,
+        email: email, // mirror of Privy email — used for retention emails
       })
       .select()
       .single();
@@ -152,6 +156,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Verify the fingerprint server-side before we trust it for bonus dedup.
+    // A spoofed/missing fingerprint still lets the user sign up, but they
+    // won't receive the $20 bonus — prevents multi-account farming.
+    const fpCheck = await verifyFingerprint(fingerprint, clientIp);
+    const trustedFingerprint =
+      fpCheck.verified && !fpCheck.botDetected ? fpCheck.visitorId : null;
+
+    // Populate signup_fingerprint / signup_ip / normalized_email regardless of
+    // whether the bonus is granted. These are used by accrue_simple_referral_reward
+    // (self-referral block, migration 025) and any future anti-abuse rules.
+    // grant_signup_bonus ALSO writes these, but only on the successful path —
+    // we write them up front so the cap-hit / disabled-bonus cases are covered.
+    // normalize_email is the SQL function from migration 013 — use it so the
+    // dedup axis stays consistent with the bonus grant path.
+    const { data: normalised } = await supabase.rpc("normalize_email", {
+      raw_email: email,
+    });
+    await supabase
+      .from("users")
+      .update({
+        signup_fingerprint: trustedFingerprint,
+        signup_ip: clientIp,
+        normalized_email: normalised,
+      })
+      .eq("id", newUser.id);
+
     // Attempt to grant the signup bonus. This is atomic — the RPC increments
     // the global counter, writes bonus_balance + wagering_remaining + expiry,
     // and rejects if the cap is reached, fingerprint is a dupe, email is a
@@ -161,7 +191,7 @@ export async function POST(request: NextRequest) {
       const { data, error: bonusErr } = await supabase.rpc("grant_signup_bonus", {
         p_user_id: newUser.id,
         p_email: email,
-        p_fingerprint: fingerprint,
+        p_fingerprint: trustedFingerprint,
         p_ip: clientIp,
       });
       if (bonusErr) {
@@ -190,6 +220,10 @@ export async function POST(request: NextRequest) {
       referrer_id: referrerId,
       signup_bonus_granted: bonusResult.granted,
       signup_bonus_amount: bonusResult.bonus_amount || 0,
+      fingerprint_verified: fpCheck.verified,
+      fingerprint_reason: fpCheck.reason ?? null,
+      fingerprint_bot_detected: fpCheck.botDetected ?? false,
+      fingerprint_incognito: fpCheck.incognito ?? false,
     });
 
     identifyServer(u.id, {
@@ -209,6 +243,27 @@ export async function POST(request: NextRequest) {
         referred_user_id: u.id,
         referred_username: u.username,
       });
+    }
+
+    // Fire welcome email (best-effort, don't block signup response)
+    if (email) {
+      sendEmail({
+        to: email,
+        subject: "Welcome to throws.gg — your $20 bonus is live",
+        category: "lifecycle",
+        userId: u.id,
+        idempotencyKey: `welcome:${u.id}`,
+        react: Welcome({
+          username: u.username,
+          bonusAmount: bonusResult.granted ? bonusResult.bonus_amount : 20,
+          wageringRequired: bonusResult.granted
+            ? bonusResult.wagering_required
+            : 60,
+          bonusExpiresAt: bonusResult.granted
+            ? bonusResult.expires_at
+            : undefined,
+        }),
+      }).catch((err) => console.error("Welcome email failed:", err));
     }
 
     if (bonusResult.granted) {

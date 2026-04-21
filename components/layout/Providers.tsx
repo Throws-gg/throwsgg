@@ -78,9 +78,19 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           referralCode: data.user.referralCode,
         });
 
-        // Identify the user in analytics
-        // Identify with full user properties for segmentation
+        // Identify the user in analytics. Raw money figures get bucketed
+        // into tiers — PostHog holds segments, not balances. Keeps us safe
+        // from PII-in-third-party-analytics for a licensed gambling product.
         const totalWagered = data.user.totalWagered || 0;
+        const balance = data.user.balance || 0;
+        const bonusBalance = data.user.bonusBalance || 0;
+        const bucket = (v: number): string =>
+          v <= 0 ? "zero"
+          : v < 10 ? "under_10"
+          : v < 100 ? "under_100"
+          : v < 1000 ? "under_1k"
+          : v < 10000 ? "under_10k"
+          : "over_10k";
         const depositTier = totalWagered >= 10000 ? "whale"
           : totalWagered >= 1000 ? "medium"
           : totalWagered >= 100 ? "small"
@@ -88,12 +98,12 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
 
         identify(data.user.id, {
           username: data.user.username,
-          total_wagered: totalWagered,
-          total_profit: data.user.totalProfit || 0,
-          current_balance: data.user.balance || 0,
-          bonus_balance: data.user.bonusBalance || 0,
-          has_active_bonus: (data.user.bonusBalance || 0) > 0,
-          wagering_remaining: data.user.wageringRemaining || 0,
+          total_wagered_tier: bucket(totalWagered),
+          total_profit_tier: bucket(data.user.totalProfit || 0),
+          current_balance_tier: bucket(balance),
+          bonus_balance_tier: bucket(bonusBalance),
+          has_active_bonus: bonusBalance > 0,
+          wagering_remaining_tier: bucket(data.user.wageringRemaining || 0),
           deposit_tier: depositTier,
           referral_code: data.user.referralCode,
           device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "desktop",
@@ -181,11 +191,12 @@ function PrivyWrapper({ children }: { children: React.ReactNode }) {
           theme: "dark",
           accentColor: "#8B5CF6",
         },
-        loginMethods: ["email", "google", "wallet"],
+        // Solana-only: we're a Solana-native product. Dropping "wallet" removes
+        // the Metamask/EVM footgun (user connects MM, signs in, has no Solana
+        // embedded wallet, deposit address is wrong-chain). Email + Google
+        // always mint a Solana embedded wallet via the Privy SDK.
+        loginMethods: ["email", "google"],
         embeddedWallets: {
-          ethereum: {
-            createOnLogin: "users-without-wallets",
-          },
           solana: {
             createOnLogin: "users-without-wallets",
           },

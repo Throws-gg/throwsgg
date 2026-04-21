@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRequest } from "@/lib/auth/verify-request";
-import { isValidSolanaAddress, sendUsdc, checkSignatureStatus } from "@/lib/wallet/send-usdc";
+import {
+  isValidSolanaAddress,
+  sendUsdc,
+  checkSignatureStatus,
+  getHotWalletSolBalance,
+  HOT_WALLET_SOL_FLOOR,
+} from "@/lib/wallet/send-usdc";
 import { LIMITS, WITHDRAWAL_FEES } from "@/lib/game/constants";
 import { trackServer } from "@/lib/analytics/posthog-server";
+import { sendEmail } from "@/lib/email/send";
+import WithdrawalSent from "@/lib/email/templates/WithdrawalSent";
 
 // Auto-send threshold — withdrawals above this require manual admin approval
 const AUTO_SEND_THRESHOLD = 100;
@@ -79,7 +87,7 @@ export async function POST(request: NextRequest) {
     // Check user is not banned
     const { data: userData } = await supabase
       .from("users")
-      .select("balance, is_banned, self_excluded_until")
+      .select("balance, is_banned, self_excluded_until, email, username")
       .eq("id", user.dbUserId)
       .single();
 
@@ -182,6 +190,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // --- Hot wallet gas pre-flight (auto-send path only) ---
+    // If the hot wallet is out of SOL, the token transfer will fail inside
+    // getOrCreateAssociatedTokenAccount — AFTER we've already debited the
+    // user's balance. The user ends up refunded via sendResult.not_submitted,
+    // but an attacker can exploit this to keep spinning withdrawals to fresh
+    // addresses (ATA rent drain) until legitimate users start hitting failed
+    // withdrawals too. Fail fast before touching balance and flag for admin
+    // top-up. Large-withdrawal path (> AUTO_SEND_THRESHOLD) skips this check
+    // because admin manually initiates the send.
+    if (amount <= AUTO_SEND_THRESHOLD) {
+      const solBalance = await getHotWalletSolBalance();
+      if (solBalance < HOT_WALLET_SOL_FLOOR) {
+        trackServer(user.dbUserId, "withdrawal_blocked_hot_wallet_low_sol", {
+          amount_usd: amount,
+          hot_wallet_sol: solBalance,
+          floor: HOT_WALLET_SOL_FLOOR,
+        });
+        // Write an admin_actions row so this shows up in the admin audit log
+        // even without a user-triggered log source. Matches the post-017
+        // schema shape used by migration 025 (admin_identifier + admin_username
+        // both TEXT NOT NULL, after_value JSONB).
+        await supabase.from("admin_actions").insert({
+          admin_identifier: "system",
+          admin_username: "system",
+          action_type: "hot_wallet_low_sol",
+          target_type: "user",
+          target_id: user.dbUserId,
+          after_value: {
+            hot_wallet_sol: solBalance,
+            floor: HOT_WALLET_SOL_FLOOR,
+            attempted_amount_usd: amount,
+          },
+          reason: `Hot wallet SOL ${solBalance.toFixed(6)} below floor ${HOT_WALLET_SOL_FLOOR}`,
+        });
+        return NextResponse.json(
+          {
+            error:
+              "Withdrawals are temporarily paused while we top up network fees. Please try again in a few minutes. Your balance has not been affected.",
+          },
+          { status: 503 }
+        );
+      }
+    }
+
     // --- Deduct balance atomically ---
     const { data: newBalance, error: balanceError } = await supabase.rpc(
       "update_balance",
@@ -256,6 +308,22 @@ export async function POST(request: NextRequest) {
           auto_sent: true,
           wallet_address: trimmedDest,
         });
+
+        if (userData.email) {
+          sendEmail({
+            to: userData.email,
+            subject: `Withdrawal sent — $${amount.toFixed(2)} USDC on its way`,
+            category: "transactional",
+            userId: user.dbUserId,
+            idempotencyKey: `withdrawal:${sendResult.signature}`,
+            react: WithdrawalSent({
+              username: userData.username,
+              amountUsd: amount,
+              destination: trimmedDest,
+              txSignature: sendResult.signature,
+            }),
+          }).catch((err) => console.error("Withdrawal email failed:", err));
+        }
 
         return NextResponse.json({
           status: "completed",
@@ -362,6 +430,22 @@ export async function POST(request: NextRequest) {
           wallet_address: trimmedDest,
           recovered_from_unknown: true,
         });
+
+        if (userData.email) {
+          sendEmail({
+            to: userData.email,
+            subject: `Withdrawal sent — $${amount.toFixed(2)} USDC on its way`,
+            category: "transactional",
+            userId: user.dbUserId,
+            idempotencyKey: `withdrawal:${sendResult.signature}`,
+            react: WithdrawalSent({
+              username: userData.username,
+              amountUsd: amount,
+              destination: trimmedDest,
+              txSignature: sendResult.signature,
+            }),
+          }).catch((err) => console.error("Withdrawal email failed:", err));
+        }
 
         return NextResponse.json({
           status: "completed",

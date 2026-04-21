@@ -235,6 +235,80 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal B (deferred security hardening — LOCAL ONLY, PRE-PUSH)
+
+Followed up on the four deferred items from `SECURITY_AUDIT_2026-04-20.md` §7 that were within launch-window scope. Nothing committed yet — Connor to review locally first. No migrations.
+
+**Shipped locally:**
+
+1. **I3 — Security headers.** `next.config.ts` now adds `X-Frame-Options: DENY` (kills the `/wallet` clickjacking vector — scariest remaining issue), HSTS (2y + preload), Referrer-Policy, Permissions-Policy, X-Content-Type-Options, plus CSP in **Report-Only** mode (enforcing `frame-ancestors 'none'` still via the X-Frame-Options header). CSP allowlist covers Privy, PostHog, Supabase realtime, Solana RPCs, Fingerprint, Resend. Ship as report-only first — watch the violation endpoint for a few days before promoting to enforcing.
+
+2. **I4 — PostHog PII scrub.** `lib/analytics/posthog-server.ts` now runs every `trackServer` / `identifyServer` call through a `scrubProperties` pass: `wallet_address` → `wallet_hash` (SHA-256 first 16 hex), `destination_address` → `destination_hash`, `tx_hash` → dropped, raw balance fields (`new_balance`, `current_balance`, `total_wagered`, etc.) → `*_tier` buckets (`zero` / `under_10` / `under_100` / `under_1k` / `under_10k` / `over_10k`). Call sites (`withdraw`, `deposit`, `auth/sync`) didn't need edits — the helper handles it centrally. Also tiered the client-side `identify()` in `Providers.tsx` (raw `current_balance` / `total_wagered` etc. were going out on every auth sync).
+
+3. **I6 — Privy `loginMethods` tightened to Solana-only.** Dropped `"wallet"` from `loginMethods` in `Providers.tsx` (removes the Metamask/EVM signin footgun). Also dropped the Ethereum embedded wallet config — we never use it. Now just `["email", "google"]` with a Solana embedded wallet auto-created on login.
+
+4. **W4 — Hot wallet SOL floor check.** `lib/wallet/send-usdc.ts` gained `getHotWalletSolBalance()` + exported `HOT_WALLET_SOL_FLOOR = 0.01`. `app/api/wallet/withdraw/route.ts` pre-flights SOL balance on the auto-send path **before** `update_balance` runs — if below floor, returns 503 "withdrawals temporarily paused" and writes an `admin_actions` row (`action_type = 'hot_wallet_low_sol'`) so it shows up in the admin audit feed. Previously the user's balance would debit, then `getOrCreateAssociatedTokenAccount` would throw, the `not_submitted` branch would refund — correct but opaque, and an ATA-grief attacker could keep spinning the cycle until real users started seeing failed withdrawals. Large-withdrawal path (>$100) skips this check because admin initiates the send manually.
+
+**Typecheck:** `npx tsc --noEmit` → 0 errors.
+
+**Deferred past launch** (still open from audit §7, not pre-launch-critical):
+- I5 structured logging / error-scrubbing (console.error paths could leak hot-wallet key bytes in Vercel logs if a future debug session logs a raw Error object)
+- A7 admin login distributed rate-limit (in-memory per-lambda is defeatable but bar is high)
+- A8 admin CSRF token (sameSite=lax is mostly sufficient for our setup)
+- A9 default-auth middleware on `/api/**` (structural fix to prevent future forgotten-verifyRequest regressions)
+
+**Operator pre-push checklist for this batch:**
+1. No env vars to add. No migrations. Pure code.
+2. Deploy to Vercel, then check a few pages in browser devtools:
+   - Network tab shows `Content-Security-Policy-Report-Only` and `X-Frame-Options: DENY` on `/`, `/racing`, `/wallet`.
+   - Privy login modal still lists only "Email" and "Google" (no "Connect Wallet" option).
+   - After login, a deposit or withdrawal event in PostHog shows `wallet_hash` not `wallet_address`, `new_balance_tier` not `new_balance`, no `tx_hash` property.
+3. To test W4 locally: temporarily lower `HOT_WALLET_SOL_FLOOR` to something above your wallet balance, hit withdraw, confirm 503 + admin_actions row with `action_type='hot_wallet_low_sol'`. Revert.
+4. Suggest **admin UI tab for `admin_actions WHERE action_type='hot_wallet_low_sol'`** so a top-up alert surfaces without needing to query the DB directly — can ship post-launch.
+
+### 2026-04-21 — Terminal A (Phase 4 Resend emails — full bundle, PRE-PUSH)
+
+Built on top of the earlier Phase 4 scaffolding. Migration 026 was applied by Connor. Everything below is local only — nothing pushed yet.
+
+**Templates added** (`lib/email/templates/`): `FirstDepositNudge`, `FirstBetPlaced`, `BigWin`, `BonusExpiring`, `StreakAtRisk`, `WeeklyCashbackReady`, `RakebackReady`, `ReactivationD7`, `ReactivationD14`, `ReactivationD30`, `WeeklyLeaderboardResult`, `RGMonthlyCheckin`. All use the shared `_layout` shell.
+
+**Transactional wiring (live now):**
+- `/api/wallet/deposit` — fires `DepositReceived` after a successful credit, idempotency keyed on the latest USDC signature (or `sol-<slot>` for SOL-only).
+- `/api/wallet/withdraw` — fires `WithdrawalSent` on both the happy `confirmed` path and the `recovered_from_unknown` path, keyed on the tx signature.
+
+**Not wired — awaiting Phase 1/3/5:** Big win, bonus expiring, streak at risk, cashback, rakeback, reactivation D7/D14/D30, weekly leaderboard, RG monthly check-in. All dependent on systems that don't exist yet (streaks, rakeback, cashback, weekly leaderboard cron). Templates are complete so those phases can drop them in without re-opening the email layer. Cron-driven sweep endpoint deferred with them.
+
+**Preferences UI + API (live):**
+- `GET/POST /api/user/email-preferences` — reads/writes `users.email_preferences` (JSONB) + `email_unsubscribed_at`. Transactional is never user-disableable.
+- `/settings` page — per-category checkboxes (always-on chip for transactional), global unsubscribe button, amber "you're unsubscribed" banner with resubscribe. Saves inline on toggle.
+
+**Unsubscribe flow (live):**
+- `lib/email/unsubscribe-token.ts` — HMAC-SHA256 signed tokens using `ADMIN_SESSION_SALT` (already required ≥32 chars in prod). Format: `userId.scope.sig`. No expiry.
+- `/unsubscribe?token=…` — server component, unsubscribes on GET (one-tap from email), fallback to settings link on invalid token.
+- `POST /api/unsubscribe` — handles Gmail/Yahoo one-click POSTs (reads token from query OR body). Signed-token auth — no login required.
+- `lib/email/send.ts` — every send now attaches `List-Unsubscribe: <url>, <mailto:unsubscribe@throws.gg>` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`. Required for Gmail/Yahoo bulk-sender compliance.
+
+**Resend webhook (live):**
+- `POST /api/webhooks/resend` — Svix-signed (HMAC-SHA256, 5-min replay window). Handles `email.opened/clicked/bounced/complained` → writes the matching timestamp column on `email_log` (matched via `resend_message_id`). Spam complaints auto-trigger global unsubscribe on the associated user. `RESEND_WEBHOOK_SECRET` required in prod (fail closed), optional in dev.
+
+**Env vars that need setting in Vercel prod before this ships:**
+- `RESEND_API_KEY` — from resend.com/api-keys (already called out in Terminal A's earlier entry, still required).
+- `RESEND_WEBHOOK_SECRET` — from the Resend dashboard once the webhook endpoint is configured (Endpoints → add `https://throws.gg/api/webhooks/resend` → copy the signing secret, `whsec_…` prefix fine, we strip it).
+- `NEXT_PUBLIC_APP_URL` — optional, defaults to `https://throws.gg`. Only matters if you want unsub links to land somewhere else in a preview env.
+- `EMAIL_FROM` / `EMAIL_REPLY_TO` — already documented, still optional.
+
+**Operator pre-push checklist:**
+1. Migration 026 — ✅ applied by Connor.
+2. Resend: verify `throws.gg` sending domain (SPF/DKIM/DMARC DNS), add `https://throws.gg/api/webhooks/resend` as an endpoint subscribed to `email.opened/clicked/bounced/complained`, copy signing secret → `RESEND_WEBHOOK_SECRET` in Vercel.
+3. Set `RESEND_API_KEY` in Vercel prod.
+4. Smoke test: signup → confirm welcome lands. Deposit $1 → confirm deposit email. Withdraw $5 → confirm withdrawal email. Hit the footer unsubscribe link → confirm `/settings` shows the amber banner. Toggle "resubscribe" → confirm banner clears.
+5. Optional: set up a catch-all inbox for `unsubscribe@throws.gg` (the mailto fallback in `List-Unsubscribe`). Gmail doesn't use it when HTTPS unsub is present, but some clients still do.
+
+**Known follow-ups:**
+- Cron for time-based sends (bonus-expiring, reactivation, RG monthly, weekly leaderboard/cashback/rakeback). Deferred until Phase 1/3/5 land their backing systems.
+- Consider batching the `email_log` webhook updates if open/click volume gets noisy — single UPDATE per event is fine at launch volume.
+- The `/api/unsubscribe` POST accepts the token from the query string, but Gmail's one-click flow actually POSTs to the URL in the `List-Unsubscribe` header verbatim. Our current header includes `?token=…` in the URL, so Gmail will POST to that URL with an empty body — handled by the query-string-first branch. Good.
+
 ### 2026-04-21 — Terminal B (pre-launch security audit) — **SHIPPED TO PROD**
 
 Driving the audit at repo root `SECURITY_AUDIT_2026-04-20.md` + overlapping spec in `swarm-research-for-launch/33-auth-remediation-spec.md` / `00-EXECUTIVE-SUMMARY.md`. Four-agent sweep found ~20 exploitable issues — auth, money flows, race fairness, client/infra.
@@ -429,7 +503,9 @@ NEXT_PUBLIC_FINGERPRINT_PUBLIC_KEY   # from the "Public" tab on dashboard.finger
 FINGERPRINT_SECRET_KEY                # from the "Server API" tab — used to verify visitor IDs server-side
 
 # Resend (transactional + retention emails — set in Vercel prod, optional locally)
-RESEND_API_KEY          # from resend.com/api-keys
-EMAIL_FROM              # optional, defaults to "throws.gg <no-reply@throws.gg>"
-EMAIL_REPLY_TO          # optional, defaults to "support@throws.gg"
+RESEND_API_KEY           # from resend.com/api-keys
+RESEND_WEBHOOK_SECRET    # from Resend dashboard once webhook endpoint configured; fail-closed in prod
+EMAIL_FROM               # optional, defaults to "throws.gg <no-reply@throws.gg>"
+EMAIL_REPLY_TO           # optional, defaults to "support@throws.gg"
+NEXT_PUBLIC_APP_URL      # optional; base for unsubscribe links, defaults to https://throws.gg
 ```

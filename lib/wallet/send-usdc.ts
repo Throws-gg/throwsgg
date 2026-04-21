@@ -163,6 +163,32 @@ export async function checkSignatureStatus(
 }
 
 /**
+ * Minimum SOL the hot wallet must hold for a withdrawal to proceed safely.
+ * Covers: ~5k lamports tx fee × headroom, PLUS rent-exempt reserve for an
+ * ATA in case the destination address doesn't have a USDC ATA yet
+ * (~0.00203928 SOL). 0.01 is conservative.
+ *
+ * If the hot wallet drops below this, we block new withdrawals and flag for
+ * admin top-up rather than letting `getOrCreateAssociatedTokenAccount` fail
+ * silently after balance debit.
+ */
+export const HOT_WALLET_SOL_FLOOR = 0.01;
+
+/**
+ * Check the hot wallet's SOL balance (in SOL, not lamports).
+ */
+export async function getHotWalletSolBalance(): Promise<number> {
+  const connection = new Connection(RPC_URL, "confirmed");
+  const hotWallet = getHotWallet();
+  try {
+    const lamports = await connection.getBalance(hotWallet.publicKey);
+    return lamports / 1_000_000_000;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Check the hot wallet's USDC balance.
  */
 export async function getHotWalletUsdcBalance(): Promise<number> {

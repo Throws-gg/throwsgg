@@ -19,12 +19,15 @@ export interface FullOdds {
   showOdds: number;       // Decimal odds for show (top 3)
 }
 
-export const OVERROUND = 1.042;  // 104.2% — ~4% house edge
-// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.0403 (4.03%)
-// Deliberately low. Users can verify the math on the /verify page —
-// trust > short-term margin. Matches Stake-tier edges (1-4%) while
-// offering a deeper product. Volume and retention compound faster
-// than a high take rate ever could.
+export const OVERROUND = 1.10;  // 110% — ~9.09% house edge
+// Actual house edge: (OVERROUND - 1) / OVERROUND ≈ 0.0909 (9.09%)
+// Sits inside the established virtual-sports category band (8–15% —
+// Inspired, Coral, Kiron). Chosen over a 3–4% edge because a $10K
+// bankroll on 480 races/day needs variance headroom: at 4% the 1%-tail
+// 1-day drawdown was ~$3.15K (31% of bankroll). At ~9% the same tail
+// cuts roughly in half. Users can verify the math on the /verify page —
+// we don't hide the overround, we just don't headline it. Aim is to
+// lower this over time as bankroll + handle grow.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
 // Odds caps — kept wide so the book percentage lands near OVERROUND and
 // longshots price honestly. A horse with true 0.5% prob needs ~170x to

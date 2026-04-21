@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getWalletBalances, getUsdcTransfersIn } from "@/lib/wallet/solana";
 import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 import { verifyRequest } from "@/lib/auth/verify-request";
+import { sendEmail } from "@/lib/email/send";
+import DepositReceived from "@/lib/email/templates/DepositReceived";
 
 /**
  * POST /api/wallet/deposit
@@ -252,6 +254,35 @@ export async function POST(request: NextRequest) {
       last_deposit_at: new Date().toISOString(),
       has_deposited: true,
     });
+
+    // Fire deposit-received email (transactional, always sends). Idempotency
+    // keyed on the latest signature so a retry of the deposit poll doesn't
+    // re-send. SOL-only deposits (no USDC transfer) use the slot as the key.
+    const { data: emailUser } = await supabase
+      .from("users")
+      .select("email, username")
+      .eq("id", userId)
+      .single();
+    if (emailUser?.email) {
+      const latestSig =
+        transfers.length > 0
+          ? transfers[transfers.length - 1].signature
+          : `sol-${newMaxSlot}`;
+      sendEmail({
+        to: emailUser.email,
+        subject: `Deposit received — $${totalCreditedUsd.toFixed(2)} credited`,
+        category: "transactional",
+        userId,
+        idempotencyKey: `deposit:${latestSig}`,
+        react: DepositReceived({
+          username: emailUser.username,
+          amountUsd: totalCreditedUsd,
+          token: totalCreditedUsdc >= solCreditedUsd ? "USDC" : "SOL",
+          newBalance,
+          txSignature: transfers.length > 0 ? latestSig : undefined,
+        }),
+      }).catch((err) => console.error("Deposit email failed:", err));
+    }
 
     return NextResponse.json({
       status: "deposited",

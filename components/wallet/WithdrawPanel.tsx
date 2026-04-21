@@ -44,10 +44,23 @@ export function WithdrawPanel() {
   const receiveAmount = Math.max(0, numAmount - fee);
   const maxWithdraw = Math.max(0, balance - fee);
   const effectiveAddress = useOwnWallet ? privyAddress : address.trim();
+
+  // Solana addresses are base58 (no 0/O/I/l), 32–44 chars. EVM addresses start with 0x.
+  const isEvmLike = /^0x/i.test(effectiveAddress);
+  const isBase58Shape = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(effectiveAddress);
+  const addressTouched = effectiveAddress.length > 0;
+  const addressError =
+    addressTouched && isEvmLike
+      ? "That's an Ethereum address. We only send USDC on Solana."
+      : addressTouched && !isBase58Shape
+        ? "Doesn't look like a Solana address. Double-check before sending."
+        : "";
+
   const isValid =
     numAmount >= LIMITS.MIN_WITHDRAWAL &&
     numAmount + fee <= balance &&
-    effectiveAddress.length >= 32;
+    isBase58Shape &&
+    !isEvmLike;
 
   const setQuickAmount = useCallback(
     (pct: number) => {
@@ -314,6 +327,9 @@ export function WithdrawPanel() {
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet/10 border border-violet/20 text-violet">
               no KYC under $2,000
             </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan/10 border border-cyan/20 text-cyan">
+              $2,000/week during MVP
+            </span>
           </div>
         </div>
 
@@ -413,21 +429,43 @@ export function WithdrawPanel() {
           readOnly={useOwnWallet}
           className={cn(
             "w-full py-3 px-4 rounded-xl border text-sm font-mono placeholder:text-white/15 focus:outline-none transition-colors",
-            useOwnWallet
-              ? "bg-violet/[0.04] border-violet/20 text-white/70"
-              : "bg-white/[0.03] border-white/[0.08] text-white/70 focus:border-violet/40"
+            addressError && !useOwnWallet
+              ? "bg-red-500/[0.04] border-red-500/40 text-white/70"
+              : useOwnWallet
+                ? "bg-violet/[0.04] border-violet/20 text-white/70"
+                : "bg-white/[0.03] border-white/[0.08] text-white/70 focus:border-violet/40"
           )}
         />
+        {addressError && !useOwnWallet && (
+          <p className="text-red-400/90 text-[11px] leading-relaxed px-1">
+            {addressError}
+          </p>
+        )}
       </div>
 
       {/* Warning */}
       <div className="rounded-xl border border-white/[0.04] bg-white/[0.02] px-4 py-3 flex items-start gap-2.5">
         <WarningIcon className="w-4 h-4 text-white/20 mt-0.5 shrink-0" />
-        <p className="text-white/30 text-[11px] leading-relaxed">
-          USDC will be sent on <strong className="text-white/40">Solana</strong>.
-          Sending to another chain will result in lost funds.
-          Minimum withdrawal: ${LIMITS.MIN_WITHDRAWAL.toFixed(2)}.
-        </p>
+        <div className="text-white/35 text-[11px] leading-relaxed space-y-1.5">
+          <p>
+            USDC will be sent on <strong className="text-white/55">Solana</strong>.
+            Double-check your wallet or exchange deposit address is on the
+            Solana network — sending to another chain (e.g. Ethereum, BSC,
+            Polygon) will result in lost funds.
+          </p>
+          <p>
+            Want to cash out to fiat? Withdraw to an exchange&rsquo;s
+            <strong className="text-white/55"> Solana USDC deposit address</strong>{" "}
+            (Coinbase, Binance, Kraken, etc.), then convert to your local
+            currency there.
+          </p>
+          <p className="text-white/30">
+            MVP phase limits: min ${LIMITS.MIN_WITHDRAWAL.toFixed(2)} &middot;
+            max ${LIMITS.MAX_WEEKLY_WITHDRAWAL.toLocaleString()} per rolling
+            7&nbsp;days. Helps us keep things stable while we scale — lifts
+            post&#8209;launch.
+          </p>
+        </div>
       </div>
 
       {/* Withdraw button */}
