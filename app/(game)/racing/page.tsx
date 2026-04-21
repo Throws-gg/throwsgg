@@ -17,6 +17,7 @@ import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
 import { useChat } from "@/hooks/useChat";
 import { WageringProgress } from "@/components/bonus/WageringProgress";
+import { DailyBonusCard } from "@/components/bonus/DailyBonusCard";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { track } from "@/lib/analytics/posthog";
 
@@ -420,6 +421,9 @@ export default function RacingPage() {
           </span>
         </div>
       </div>
+
+      {/* Daily login bonus card */}
+      <DailyBonusCard />
 
       {/* Active signup bonus: wagering progress banner */}
       <WageringProgress />

@@ -235,6 +235,42 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-21 — Terminal A (Phase 3 — Daily login bonus) **PRE-PUSH**
+
+Daily login bonus shipped locally end-to-end. Rides the existing `bonus_balance` / `wagering_remaining` rails from migrations 013 + 024 — no new balance concept. 1× wagering. Tier ladder mirrors rakeback (CLAUDE.md Phase 1) so users see one progression, not two.
+
+**Migration 027_daily_login_bonus.sql** ✅ applied to prod by Connor.
+- `daily_claims` table (user_id, claimed_at, claim_date DATE, amount, wagering_added, tier, fingerprint_visitor_id, ip_address). Unique `(user_id, claim_date)` enforces one-per-UTC-day.
+- `users.last_daily_claim_at` added.
+- `daily_bonus_tier(total_wagered)` — returns (tier, amount). Bronze $0.10 / Silver $0.20 / Gold $0.35 / Platinum $0.50 / Diamond $1.00 at $0 / $500 / $5K / $25K / $100K.
+- `claim_daily_bonus(user_id, fingerprint, ip)` — atomic. Checks: banned, UTC-day dedup, ≥$5 cumulative confirmed deposits, 24h rolling fingerprint + IP dedup. Credits `bonus_balance` + `wagering_remaining` (1×). Extends `bonus_expires_at` to max(existing, NOW+14d). Logs `bonus` transaction with `metadata.source = 'daily_login_bonus'`.
+- `get_daily_bonus_status(user_id)` — read-only eligibility for the UI.
+
+**Files (local only until push):**
+- `lib/bonus/daily.ts` — TS mirror of the SQL tier ladder, `getDailyBonusTier()` / `getNextDailyBonusTier()` helpers.
+- `app/api/bonus/daily/status/route.ts` — GET, `verifyRequest()`, returns `{ eligible, alreadyClaimedToday, amount, tier, tierLabel, nextClaimAt, depositRequired, currentDeposits, totalWagered }`.
+- `app/api/bonus/daily/claim/route.ts` — POST, `verifyRequest()`, server-verifies fingerprint via `verifyFingerprint()` (matches auth/sync pattern — untrusted/spoofed visitor IDs get nulled before hitting the RPC). Returns `{ granted, reason?, amount, tier, wageringAdded, nextClaimAt, user: { balance, bonusBalance, wageringRemaining, bonusExpiresAt } }`. Fires PostHog `daily_bonus_claimed` with tier, amount, fingerprint verification status.
+- `components/bonus/DailyBonusCard.tsx` — tier badge, amount, claim button, countdown when claimed, next-tier progress hint. Handles needs-deposit + already-claimed + banned + duplicate-fingerprint/ip states with specific copy.
+- `app/(game)/racing/page.tsx` — mounted above `<WageringProgress />`.
+- `app/(account)/wallet/page.tsx` — mounted below balance card.
+
+**Design note — one unified bonus bucket:** daily credits flow into the same `bonus_balance` + `wagering_remaining` as the signup bonus. If a user has an active $16 signup bonus with $30 wagering remaining and claims a $0.20 daily, they now have $16.20 bonus + $30.20 wagering — neutral (1× multiplier). Prevents two parallel bonus UIs / two sets of balance math. `settle_race` + `place_race_bet_atomic` already route payouts proportionally, no changes needed.
+
+**No env vars to add.** No new deps. `FINGERPRINT_SECRET_KEY` already set in Vercel.
+
+**Operator QA after push:**
+1. Fresh throwaway account, no deposit → card shows "Deposit $5 to unlock" + CTA.
+2. Deposit $5+ → card shows Claim button at Bronze ($0.10).
+3. Claim → `bonus_balance` jumps $0.10, `wagering_remaining` jumps $0.10, card flips to "claimed today, next in Xh Ym". PostHog fires `daily_bonus_claimed`.
+4. Refresh page → still claimed.
+5. Second browser, same IP, fresh account → should be blocked by `duplicate_ip`.
+6. Check Supabase `daily_claims` table has the row. Check `transactions` has the `bonus` row with `metadata.source = 'daily_login_bonus'`.
+7. Spot-check `/wallet` Recent Transactions list shows the claim.
+
+**Tone update — `feedback_tone_of_voice.md` reversed:** Connor dialled back the full degen/meme tone to "confident + light personality, not meme-heavy". DailyBonusCard copy reflects this ("Claim" not "LFG your $0.20 is ready"). CLAUDE.md's "Degen tone" guideline is now stale — treat the memory as source of truth.
+
+**Next in retention queue:** Phase 1 (rakeback) is next per CLAUDE.md ordering. Connor approved rakeback AT launch (reversed the earlier "defer" memory) — `feedback_vip_rakeback.md` updated with the new tiered-instant design. VIP tier UI wraps rakeback as the headline benefit per tier.
+
 ### 2026-04-21 — Terminal B + A bundle **SHIPPED TO PROD** (`efa8595` on main)
 
 Pushed a single bundle containing Terminal B's deferred security hardening AND Terminal A's full Phase 4 Resend email bundle (was sitting pre-push, tangled in the same files — shipping together resolved the tangle). Also swept up two other pre-push changes that were already in the working tree: odds overround 1.042→1.10 and WithdrawPanel Solana-only client guard.
