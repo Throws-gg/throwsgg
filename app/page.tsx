@@ -299,7 +299,7 @@ export default function LandingPage() {
                 transition={{ duration: 0.6, delay: 0.3 }}
                 className="text-sm sm:text-base text-white/30 max-w-md mx-auto lg:mx-0 leading-relaxed"
               >
-                16 AI horses. new race every 3 minutes. fixed odds, provably fair, no kyc.
+                16 virtual horses. new race every 3 minutes. fixed odds, provably fair, no kyc.
                 built for degens who hate getting rugged.
               </motion.p>
 
@@ -415,7 +415,7 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-8">
             {[
-              { value: 16, label: "AI Horses", suffix: "" },
+              { value: 16, label: "Horses", suffix: "" },
               { value: 480, label: "Races / Day", suffix: "" },
               { value: 3, label: "Min per Race", suffix: "" },
               { value: 0, label: "KYC Required", suffix: "" },

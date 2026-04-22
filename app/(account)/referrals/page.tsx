@@ -131,7 +131,7 @@ export default function ReferralsPage() {
     if (!fullReferralLink) return;
     track("referral_shared_x", { referral_code: referralCode });
     const text = encodeURIComponent(
-      `16 AI horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullReferralLink}`
+      `16 virtual horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullReferralLink}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   }, [fullReferralLink, referralCode]);

@@ -416,7 +416,7 @@ function ReferralCard({ code }: { code: string }) {
 
   const handleShareX = () => {
     const text = encodeURIComponent(
-      `16 AI horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullLink}`
+      `16 virtual horses. new race every 3 minutes. provably fair. crypto-native.\n\nthrows.gg is the fastest horse racing on the internet. $20 free when you sign up:\n\n${fullLink}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   };

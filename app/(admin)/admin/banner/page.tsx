@@ -149,7 +149,7 @@ const Banner = forwardRef<HTMLDivElement>(function Banner(_, ref) {
             fontSize: 15, color: "rgba(255,255,255,0.30)", letterSpacing: "0.02em",
             lineHeight: 1.5,
           }}>
-            16 AI horses &middot; Fixed odds &middot; Races every 3 min &middot; Provably fair &middot; Crypto-native
+            16 virtual horses &middot; Fixed odds &middot; Races every 3 min &middot; Provably fair &middot; Crypto-native
           </div>
         </div>
 

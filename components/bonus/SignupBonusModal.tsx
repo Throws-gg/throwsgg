@@ -120,14 +120,6 @@ export function SignupBonusModal() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-white/50">Max bet while active</span>
-                <span className="text-white font-bold font-mono">$5</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/50">Min odds</span>
-                <span className="text-white font-bold font-mono">2.00</span>
-              </div>
-              <div className="flex items-center justify-between">
                 <span className="text-white/50">Expires</span>
                 <span className="text-white font-bold">14 days</span>
               </div>

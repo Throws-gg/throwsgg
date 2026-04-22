@@ -14,7 +14,7 @@ const outfit = Outfit({
 export const metadata: Metadata = {
   title: "Throws.gg — virtual horse racing, real payouts",
   description:
-    "16 AI horses. Fixed odds. Races every 3 minutes. Provably fair, crypto-native. They race. You bet. You profit.",
+    "16 virtual horses. Fixed odds. Races every 3 minutes. Provably fair, crypto-native. They race. You bet. You profit.",
 };
 
 export default function RootLayout({
