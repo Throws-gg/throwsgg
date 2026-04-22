@@ -34,26 +34,26 @@ export function Layout({ preview, children }: LayoutProps) {
           <Hr style={hr} />
           <Section style={footer}>
             <Text style={footerText}>
-              throws.gg · virtual horse racing
+              throws.gg — virtual horse racing
             </Text>
             <Text style={footerText}>
               <Link href="https://throws.gg/settings" style={footerLink}>
-                email preferences
+                Email preferences
               </Link>
               {" · "}
               <Link
                 href="https://throws.gg/responsible-gambling"
                 style={footerLink}
               >
-                responsible gambling
+                Responsible gambling
               </Link>
               {" · "}
               <Link href="https://throws.gg/terms" style={footerLink}>
-                terms
+                Terms
               </Link>
             </Text>
             <Text style={footerFine}>
-              18+ only. Gamble responsibly. Virtual sports — outcomes are
+              18+ only. Please play responsibly. Virtual sports — outcomes are
               deterministic and provably fair.
             </Text>
           </Section>

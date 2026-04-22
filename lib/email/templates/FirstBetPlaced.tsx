@@ -16,36 +16,41 @@ interface FirstBetPlacedProps {
 }
 
 export default function FirstBetPlaced({
-  username = "degen",
+  username = "there",
   horseName = "your pick",
   amount,
   oddsDecimal,
 }: FirstBetPlacedProps) {
   return (
-    <Layout preview="First bet locked in — welcome to the races">
-      <Text style={headingStyle}>first bet&apos;s on the board, {username}</Text>
+    <Layout preview="Your first bet is locked in">
+      <Text style={headingStyle}>Your first bet is locked in</Text>
       <Text style={textStyle}>
-        you backed <strong>{horseName}</strong>
+        Nice one, {username}. You backed <strong>{horseName}</strong>
         {amount ? (
           <>
-            {" "}for <strong>${amount.toFixed(2)}</strong>
+            {" "}for <strong>{amount.toFixed(2)} USDC</strong>
           </>
         ) : null}
         {oddsDecimal ? (
           <>
-            {" "}at <strong>{oddsDecimal.toFixed(2)}×</strong>
+            {" "}at <strong>{oddsDecimal.toFixed(2)}x</strong> odds
           </>
         ) : null}
-        . outcome is already sealed — the server seed was committed before
-        betting closed. every race is verifiable on /verify.
+        .
+      </Text>
+      <Text style={textStyle}>
+        The race outcome is already sealed — the server seed was committed
+        before betting closed, and every race is verifiable from the{" "}
+        <strong>/verify</strong> page after it settles.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          watch the race →
+          Watch the race
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        wager $60 total and your signup bonus unlocks to cash.
+        Reminder: wager 60 USDC total to unlock your signup bonus as
+        withdrawable cash.
       </Text>
     </Layout>
   );

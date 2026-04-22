@@ -18,7 +18,7 @@ interface BigWinProps {
 }
 
 export default function BigWin({
-  username = "degen",
+  username = "there",
   winAmount,
   horseName,
   oddsDecimal,
@@ -26,17 +26,16 @@ export default function BigWin({
   shareUrl,
 }: BigWinProps) {
   const shareText = encodeURIComponent(
-    `just hit $${winAmount.toFixed(2)} on throws.gg 🏇 virtual horse racing, every 3 minutes`
+    `Just won ${winAmount.toFixed(2)} USDC on throws.gg — virtual horse racing, a new race every three minutes.`
   );
   const xShare = `https://x.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(
     shareUrl || "https://throws.gg"
   )}`;
   return (
-    <Layout preview={`ABSOLUTE UNIT — $${winAmount.toFixed(2)} win`}>
-      <Text style={headingStyle}>ABSOLUTE UNIT</Text>
+    <Layout preview={`Nice win — ${winAmount.toFixed(2)} USDC`}>
+      <Text style={headingStyle}>Nice win, {username}</Text>
       <Text style={textStyle}>
-        {username}, you just took <strong>${winAmount.toFixed(2)}</strong> off
-        the house
+        You just won <strong>{winAmount.toFixed(2)} USDC</strong>
         {horseName ? (
           <>
             {" "}with <strong>{horseName}</strong>
@@ -44,18 +43,20 @@ export default function BigWin({
         ) : null}
         {oddsDecimal ? (
           <>
-            {" "}at <strong>{oddsDecimal.toFixed(2)}×</strong>
+            {" "}at <strong>{oddsDecimal.toFixed(2)}x</strong>
           </>
         ) : null}
-        {raceNumber ? <> in race #{raceNumber}</> : null}. LFG.
+        {raceNumber ? <> in race #{raceNumber}</> : null}. Your balance has
+        already been credited.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href={xShare} style={buttonStyle}>
-          share on X →
+          Share on X
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        every race is provably fair. verify the seed on /verify.
+        Every race is provably fair — you can verify the seed and outcome on
+        the /verify page.
       </Text>
     </Layout>
   );

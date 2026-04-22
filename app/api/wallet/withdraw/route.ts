@@ -312,7 +312,7 @@ export async function POST(request: NextRequest) {
         if (userData.email) {
           sendEmail({
             to: userData.email,
-            subject: `Withdrawal sent — $${amount.toFixed(2)} USDC on its way`,
+            subject: `Your withdrawal is on its way`,
             category: "transactional",
             userId: user.dbUserId,
             idempotencyKey: `withdrawal:${sendResult.signature}`,
@@ -434,7 +434,7 @@ export async function POST(request: NextRequest) {
         if (userData.email) {
           sendEmail({
             to: userData.email,
-            subject: `Withdrawal sent — $${amount.toFixed(2)} USDC on its way`,
+            subject: `Your withdrawal is on its way`,
             category: "transactional",
             userId: user.dbUserId,
             idempotencyKey: `withdrawal:${sendResult.signature}`,

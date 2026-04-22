@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
         // runs once per user.
         sendEmail({
           to: email,
-          subject: "Welcome to throws.gg — your account is set up",
+          subject: "Welcome to throws.gg",
           category: "lifecycle",
           userId: existing.id,
           idempotencyKey: `welcome:${existing.id}`,
@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
     if (email) {
       sendEmail({
         to: email,
-        subject: "Welcome to throws.gg — your $20 bonus is live",
+        subject: "Welcome to throws.gg",
         category: "lifecycle",
         userId: u.id,
         idempotencyKey: `welcome:${u.id}`,

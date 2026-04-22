@@ -15,7 +15,7 @@ interface WeeklyCashbackReadyProps {
 }
 
 export default function WeeklyCashbackReady({
-  username = "degen",
+  username = "there",
   cashbackAmount,
   weekEndingIso,
 }: WeeklyCashbackReadyProps) {
@@ -24,21 +24,23 @@ export default function WeeklyCashbackReady({
     day: "numeric",
   });
   return (
-    <Layout preview={`$${cashbackAmount.toFixed(2)} cashback ready to claim`}>
+    <Layout preview={`Your weekly cashback is ready to claim`}>
       <Text style={headingStyle}>
-        ${cashbackAmount.toFixed(2)} back, {username}
+        Your weekly cashback is ready
       </Text>
       <Text style={textStyle}>
-        week ending {weekEnding} — your cashback is ready. tap in, claim,
-        deploy it on the next race.
+        Hi {username}, for the week ending {weekEnding} you&apos;ve earned{" "}
+        <strong>{cashbackAmount.toFixed(2)} USDC</strong> in cashback. Tap the
+        button below and it&apos;ll drop straight into your balance.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/wallet" style={buttonStyle}>
-          claim cashback →
+          Claim cashback
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        unclaimed cashback rolls forward indefinitely. no expiry.
+        Cashback never expires. If you prefer to let it build up, unclaimed
+        amounts roll forward to next week.
       </Text>
     </Layout>
   );

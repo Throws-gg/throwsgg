@@ -12,11 +12,11 @@ interface BonusExpiringProps {
   username?: string;
   bonusBalance: number;
   wageringRemaining: number;
-  expiresAt: string; // ISO
+  expiresAt: string;
 }
 
 export default function BonusExpiring({
-  username = "degen",
+  username = "there",
   bonusBalance,
   wageringRemaining,
   expiresAt,
@@ -27,23 +27,32 @@ export default function BonusExpiring({
     Math.floor((expiresDate.getTime() - Date.now()) / (60 * 60 * 1000))
   );
   return (
-    <Layout preview={`$${bonusBalance.toFixed(2)} bonus expires in ${hoursLeft}h`}>
+    <Layout
+      preview={`Your ${bonusBalance.toFixed(2)} USDC bonus expires in ${hoursLeft} hours`}
+    >
       <Text style={headingStyle}>
-        ${bonusBalance.toFixed(2)} on the clock, {username}
+        Your bonus expires in {hoursLeft} hours
       </Text>
       <Text style={textStyle}>
-        your signup bonus expires in roughly <strong>{hoursLeft} hours</strong>.
-        finish <strong>${wageringRemaining.toFixed(2)}</strong> of wagering
-        and it converts to withdrawable cash in one shot.
+        Hi {username}, just a heads up: your{" "}
+        <strong>{bonusBalance.toFixed(2)} USDC</strong> signup bonus expires
+        soon.
+      </Text>
+      <Text style={textStyle}>
+        You need to wager another{" "}
+        <strong>{wageringRemaining.toFixed(2)} USDC</strong> to unlock it as
+        withdrawable cash. Any bet counts toward the requirement — no minimum
+        odds.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          clear the wager →
+          Clear the wagering
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        any bet counts toward the requirement. lowest odds, highest odds,
-        doesn&apos;t matter.
+        Once the requirement is met, the full bonus balance converts to cash
+        in a single step. If you don&apos;t clear it in time, the bonus is
+        forfeited but any winnings you&apos;ve already locked in stay yours.
       </Text>
     </Layout>
   );

@@ -14,33 +14,34 @@ interface ReactivationD7Props {
 }
 
 export default function ReactivationD7({
-  username = "degen",
+  username = "there",
   balance,
 }: ReactivationD7Props) {
   return (
-    <Layout preview="The horses have been asking about you">
-      <Text style={headingStyle}>it&apos;s been a week, {username}</Text>
+    <Layout preview="It's been a week — we've missed you">
+      <Text style={headingStyle}>It&apos;s been a week, {username}</Text>
       <Text style={textStyle}>
         {balance && balance > 0 ? (
           <>
-            you&apos;ve still got <strong>${balance.toFixed(2)}</strong> on
-            account. that&apos;s real money sitting on the rail — put it to
-            work.
+            You still have <strong>{balance.toFixed(2)} USDC</strong> on your
+            throws.gg account. Whenever you want to jump back in, the next
+            race is only a few minutes away.
           </>
         ) : (
           <>
-            the track ran ~3,360 races since you last showed up. horses hit
-            form, lost form, smashed form. come look at the form guide.
+            Since your last visit we&apos;ve run about 3,360 races. Horses
+            have hit form, lost form, and the leaderboard has reshuffled. If
+            you want to come back, everything&apos;s still here.
           </>
         )}
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          next race →
+          Open the next race
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        not feeling it? you can mute these from /settings.
+        Not feeling it? You can mute reactivation emails from your settings.
       </Text>
     </Layout>
   );

@@ -234,6 +234,29 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-22 — Terminal A (email deliverability + copy rewrite) **PRE-PUSH**
+
+Connor reported the welcome email landing in spam (Gmail) and arriving with delay. Diagnosed three contributing factors: (a) all-lowercase / "degen" tone in subjects + body raises spam scores on a brand-new sending domain, (b) HTML-only sends with no plaintext part, (c) `no-reply@` From address. Rewrote all 15 templates and tightened the send pipeline.
+
+**Code changes (all PRE-PUSH, no migrations):**
+- `lib/email/send.ts` — every send now includes both `html` and `text`. The plaintext is derived via `render(react, { plainText: true })` (supported in `@react-email/render` v2.0.7). Multipart messages score noticeably better with Gmail/Outlook spam filters; also renders correctly in plaintext-mode mail clients.
+- `lib/email/client.ts` — default `EMAIL_FROM` changed from `throws.gg <no-reply@throws.gg>` to `Connor at throws.gg <connor@throws.gg>`. Default `EMAIL_REPLY_TO` from `support@throws.gg` to `connor@throws.gg`. Personal-sounding From + matching Reply-To consistently improves inbox placement on a new domain. Vercel env `EMAIL_FROM` / `EMAIL_REPLY_TO` overrides remain authoritative — defaults only matter for new envs.
+- 15 templates rewritten in `lib/email/templates/*.tsx` — sentence-case headings, professional-but-warm tone (think "founder writing a personal note"), no all-caps, no "degen" / "fr fr" / "LFG" copy, dollar amounts written as `XX USDC` not `$XX` (avoids the dollar-sign-in-subject spam-score hit), cleaner CTAs ("Open the next race" vs "open the next race →"). Welcome / Reactivation / D14 / D30 explicitly invite reply-to-founder ("I read every email personally"). `BigWin` no longer says "ABSOLUTE UNIT".
+- Subject lines tightened in 3 call-sites: `app/api/auth/sync/route.ts` (welcome — both fresh and backfill paths) → `Welcome to throws.gg`. `app/api/wallet/deposit/route.ts` → `Your deposit has been credited`. `app/api/wallet/withdraw/route.ts` (both confirmed paths) → `Your withdrawal is on its way`. Removed dollar amounts from subjects entirely (they tank deliverability on new domains).
+- `lib/email/templates/_layout.tsx` — footer links capitalised ("Email preferences" not "email preferences"), tagline polished ("Please play responsibly").
+
+**What this DOESN'T fix and Connor needs to handle operationally:**
+- Domain warm-up. throws.gg is brand-new in the eyes of Gmail's reputation system. Even with this rewrite, expect the first 1–2 weeks of Gmail sends to land in Promotions or occasionally Spam. Stays clean as send volume builds steadily.
+- DMARC policy. Recommend `p=none` for the first 2 weeks, then `p=quarantine`, then `p=reject` once reputation builds. If currently set tighter than `p=none`, loosen it for now — strict DMARC on a 0-reputation domain bins more legit mail than it protects.
+- Postmaster Tools. Sign throws.gg up at `postmaster.google.com` once you've sent ~100 messages — gives reputation visibility.
+- The new `connor@throws.gg` mailbox. Needs to actually receive mail (Cloudflare Email Routing → forward to your personal Gmail is fine, takes 5 min). Without it, the personal-From + reply-to-founder copy hits a hard bounce when users reply.
+
+**Smoke test after push:**
+1. Throwaway Gmail signup → welcome should land in Primary or Promotions (not Spam) and read like a normal founder note.
+2. View source on the welcome — confirm both `text/html` and `text/plain` parts present, From: `Connor at throws.gg <connor@throws.gg>`, `List-Unsubscribe` header present.
+3. Reply to the welcome → should land in your inbox (via Cloudflare forward).
+4. Existing Google users on next login: welcome backfill should fire with the new copy + subject.
+
 ### 2026-04-21 — Terminal B (geo-blocking) **PRE-PUSH**
 
 Jurisdictional geo-block middleware. Sourced from `swarm-research-for-launch/25-geoblock-jurisdictions.md` §1A–1C. Ships the P0 middleware-only subset — IPQS VPN detection, Chainalysis sanctions screening, age-gate modal, dedicated `compliance_geo_blocks` table all remain deferred (per Connor's call: unlicensed soft-launch, add them when we have an Anjouan licence to protect).

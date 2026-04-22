@@ -13,28 +13,28 @@ interface FirstDepositNudgeProps {
 }
 
 export default function FirstDepositNudge({
-  username = "degen",
+  username = "there",
 }: FirstDepositNudgeProps) {
   return (
-    <Layout preview="Your first deposit unlocks the full track">
-      <Text style={headingStyle}>still on the rail, {username}?</Text>
+    <Layout preview="Ready when you are">
+      <Text style={headingStyle}>Ready whenever you are, {username}</Text>
       <Text style={textStyle}>
-        you&apos;re signed up but haven&apos;t made a deposit yet. USDC or SOL
-        on Solana — minimum $1, no KYC under $2,000, usually in your account
-        in under a minute.
+        You signed up but haven&apos;t made a deposit yet. Whenever you&apos;re
+        ready, you can deposit USDC or SOL on Solana. Minimum is 1 USDC, no KYC
+        under 2,000 USDC, and the credit usually shows up in under a minute.
       </Text>
       <Text style={textStyle}>
-        the next race is always less than 3 minutes away. pick a horse, lock
-        the odds, watch it play out.
+        The next race is always less than three minutes away. Pick a horse,
+        lock in the odds, and watch the race play out.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/wallet" style={buttonStyle}>
-          deposit now →
+          Go to your wallet
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        not ready? reply and tell us what&apos;s blocking you — we read every
-        one.
+        Not ready? Reply and tell me what&apos;s stopping you — I read every
+        email personally.
       </Text>
     </Layout>
   );

@@ -17,32 +17,38 @@ interface DepositReceivedProps {
 }
 
 export default function DepositReceived({
-  username = "degen",
+  username = "there",
   amountUsd,
   token,
   newBalance,
   txSignature,
 }: DepositReceivedProps) {
   return (
-    <Layout preview={`Deposit received — $${amountUsd.toFixed(2)} credited`}>
+    <Layout preview={`Deposit received — ${amountUsd.toFixed(2)} USDC credited`}>
       <Text style={headingStyle}>
-        ${amountUsd.toFixed(2)} landed, {username}
+        Your deposit has been credited
       </Text>
       <Text style={textStyle}>
-        your {token} deposit cleared. new balance: <strong>${newBalance.toFixed(2)}</strong>.
+        Hi {username}, we received your {token} deposit of{" "}
+        <strong>{amountUsd.toFixed(2)} USDC</strong>. Your new balance is{" "}
+        <strong>{newBalance.toFixed(2)} USDC</strong>.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          place a bet →
+          Place a bet
         </Button>
       </Section>
       {txSignature && (
         <Text style={mutedStyle}>
-          tx: <code style={code}>{txSignature.slice(0, 12)}…{txSignature.slice(-8)}</code>
+          Transaction:{" "}
+          <code style={code}>
+            {txSignature.slice(0, 12)}…{txSignature.slice(-8)}
+          </code>
         </Text>
       )}
       <Text style={mutedStyle}>
-        didn&apos;t make this deposit? reply to this email immediately.
+        If you didn&apos;t make this deposit, please reply to this email right
+        away.
       </Text>
     </Layout>
   );

@@ -15,28 +15,30 @@ interface StreakAtRiskProps {
 }
 
 export default function StreakAtRisk({
-  username = "degen",
+  username = "there",
   streakDays,
   hoursLeft,
 }: StreakAtRiskProps) {
   return (
-    <Layout preview={`${streakDays}-day streak at risk — ${hoursLeft}h left`}>
+    <Layout
+      preview={`${streakDays}-day streak — ${hoursLeft} hours left`}
+    >
       <Text style={headingStyle}>
-        {streakDays}-day streak is on the line
+        Your {streakDays}-day streak is at risk
       </Text>
       <Text style={textStyle}>
-        {username}, you&apos;re <strong>{hoursLeft} hours</strong> from losing
-        a <strong>{streakDays}-day</strong> streak. one bet before midnight
-        (UTC) keeps it alive.
+        Hi {username}, you have about <strong>{hoursLeft} hours</strong> left
+        to keep your <strong>{streakDays}-day streak</strong> alive. One bet
+        before midnight UTC is enough.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          save the streak →
+          Keep the streak alive
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        streak freezes activate automatically if you use one — check your
-        profile.
+        Streak freezes activate automatically if you have any available — you
+        can check your profile to see how many you&apos;ve earned.
       </Text>
     </Layout>
   );

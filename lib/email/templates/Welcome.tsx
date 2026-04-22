@@ -10,13 +10,13 @@ import {
 
 interface WelcomeProps {
   username?: string;
-  bonusAmount?: number; // USDC, e.g. 20
-  wageringRequired?: number; // e.g. 60
-  bonusExpiresAt?: string; // ISO
+  bonusAmount?: number;
+  wageringRequired?: number;
+  bonusExpiresAt?: string;
 }
 
 export default function Welcome({
-  username = "degen",
+  username = "there",
   bonusAmount = 20,
   wageringRequired = 60,
   bonusExpiresAt,
@@ -26,27 +26,31 @@ export default function Welcome({
         month: "short",
         day: "numeric",
       })
-    : "14 days";
+    : "in 14 days";
   return (
-    <Layout preview={`Welcome to throws.gg — your $${bonusAmount} bonus is live`}>
-      <Text style={headingStyle}>welcome to the track, {username}</Text>
+    <Layout preview="Your throws.gg account is ready">
+      <Text style={headingStyle}>Welcome to throws.gg, {username}</Text>
       <Text style={textStyle}>
-        you&apos;re in. throws.gg runs a virtual horse race every 3 minutes —
-        480 a day, 16 horses with real form, provably fair every time.
+        Thanks for signing up. throws.gg runs a virtual horse race every three
+        minutes — 480 races a day, 16 horses with real form data, and every
+        outcome is provably fair.
       </Text>
       <Text style={textStyle}>
-        your <strong>${bonusAmount} signup bonus</strong> is already in your
-        account. wager ${wageringRequired} (3× the bonus) and it converts to
-        cash you can withdraw. expires {expiresText}.
+        We&apos;ve added a {bonusAmount} USDC welcome bonus to your account.
+        Wager {wageringRequired} USDC (three times the bonus) and it converts
+        to withdrawable cash. The bonus expires {expiresText}.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
-          open the next race →
+          Open the next race
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        first time? deposit with USDC or SOL on Solana — no KYC under $2,000,
-        withdrawals usually under 5 minutes.
+        First time? You can deposit with USDC or SOL on Solana. No KYC under
+        2,000 USDC, and withdrawals usually land in under five minutes.
+      </Text>
+      <Text style={mutedStyle}>
+        Questions? Just reply — I read every message.
       </Text>
     </Layout>
   );

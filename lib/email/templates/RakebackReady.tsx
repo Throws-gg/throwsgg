@@ -16,30 +16,40 @@ interface RakebackReadyProps {
 }
 
 export default function RakebackReady({
-  username = "degen",
+  username = "there",
   rakebackAmount,
   tierName,
   tierPct,
 }: RakebackReadyProps) {
   return (
-    <Layout preview={`$${rakebackAmount.toFixed(2)} rakeback ready`}>
+    <Layout preview="Your rakeback is ready to claim">
       <Text style={headingStyle}>
-        ${rakebackAmount.toFixed(2)} rakeback, {username}
+        Your rakeback is ready to claim
       </Text>
       <Text style={textStyle}>
-        {tierName && tierPct
-          ? `${tierName} tier — ${tierPct}% of every bet`
-          : "a cut of your wagering"}
-        {" "}just hit claimable. no wagering requirement, no expiry.
+        Hi {username}, you have{" "}
+        <strong>{rakebackAmount.toFixed(2)} USDC</strong> in rakeback waiting
+        for you.
+        {tierName && tierPct ? (
+          <>
+            {" "}You&apos;re on the <strong>{tierName}</strong> tier, which
+            pays <strong>{tierPct}%</strong> of the house edge back to you on
+            every bet.
+          </>
+        ) : null}
+      </Text>
+      <Text style={textStyle}>
+        There&apos;s no wagering requirement and no expiry — the amount sits
+        in your account until you claim it.
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/wallet" style={buttonStyle}>
-          claim rakeback →
+          Claim rakeback
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        rakeback accrues continuously. the more you wager, the higher the
-        tier.
+        Rakeback accrues continuously as you play. The more you wager, the
+        higher your tier.
       </Text>
     </Layout>
   );

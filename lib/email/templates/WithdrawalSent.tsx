@@ -11,12 +11,12 @@ import {
 interface WithdrawalSentProps {
   username?: string;
   amountUsd: number;
-  destination: string; // solana address
+  destination: string;
   txSignature: string;
 }
 
 export default function WithdrawalSent({
-  username = "degen",
+  username = "there",
   amountUsd,
   destination,
   txSignature,
@@ -24,33 +24,36 @@ export default function WithdrawalSent({
   const explorerUrl = `https://solscan.io/tx/${txSignature}`;
   return (
     <Layout
-      preview={`Withdrawal sent — $${amountUsd.toFixed(2)} USDC on its way`}
+      preview={`Withdrawal sent — ${amountUsd.toFixed(2)} USDC on its way`}
     >
-      <Text style={headingStyle}>${amountUsd.toFixed(2)} USDC on its way</Text>
+      <Text style={headingStyle}>
+        Your withdrawal is on its way
+      </Text>
       <Text style={textStyle}>
-        hey {username}, your withdrawal is on-chain. usually lands within a
-        minute once Solana confirms.
+        Hi {username}, your withdrawal of{" "}
+        <strong>{amountUsd.toFixed(2)} USDC</strong> has been broadcast to
+        Solana. It usually lands within a minute once the network confirms.
       </Text>
       <Section style={boxStyle}>
-        <Text style={rowLabel}>destination</Text>
+        <Text style={rowLabel}>Destination</Text>
         <Text style={rowValue}>
           {destination.slice(0, 8)}…{destination.slice(-8)}
         </Text>
-        <Text style={rowLabel}>amount</Text>
-        <Text style={rowValue}>${amountUsd.toFixed(2)} USDC</Text>
-        <Text style={rowLabel}>transaction</Text>
+        <Text style={rowLabel}>Amount</Text>
+        <Text style={rowValue}>{amountUsd.toFixed(2)} USDC</Text>
+        <Text style={rowLabel}>Transaction</Text>
         <Text style={rowValue}>
           {txSignature.slice(0, 12)}…{txSignature.slice(-8)}
         </Text>
       </Section>
       <Section style={{ margin: "24px 0" }}>
         <Button href={explorerUrl} style={buttonStyle}>
-          view on Solscan →
+          View on Solscan
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        didn&apos;t request this? reply to this email immediately — we&apos;ll
-        lock your account.
+        If you didn&apos;t request this withdrawal, reply immediately and
+        we&apos;ll lock the account.
       </Text>
     </Layout>
   );

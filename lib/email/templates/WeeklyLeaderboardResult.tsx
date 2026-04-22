@@ -17,7 +17,7 @@ interface WeeklyLeaderboardResultProps {
 }
 
 export default function WeeklyLeaderboardResult({
-  username = "degen",
+  username = "there",
   rank,
   totalEntrants,
   prizeAmount,
@@ -32,33 +32,40 @@ export default function WeeklyLeaderboardResult({
     <Layout
       preview={
         placed
-          ? `#${rank} this week — $${prizeAmount!.toFixed(2)} prize`
-          : `Week of ${weekEnding} leaderboard result`
+          ? `You finished #${rank} this week — ${prizeAmount!.toFixed(2)} USDC prize`
+          : `Your leaderboard result for the week of ${weekEnding}`
       }
     >
       <Text style={headingStyle}>
-        {placed ? `#${rank} finish, ${username}` : `this week on throws.gg`}
+        {placed
+          ? `Nice finish, ${username}`
+          : `This week's leaderboard is in`}
       </Text>
       <Text style={textStyle}>
-        week ending {weekEnding}: you finished{" "}
-        <strong>#{rank}</strong> of {totalEntrants.toLocaleString()} entrants.
+        For the week ending {weekEnding}, you finished{" "}
+        <strong>#{rank}</strong> out of {totalEntrants.toLocaleString()}{" "}
+        entrants.
         {placed ? (
           <>
-            {" "}prize: <strong>${prizeAmount!.toFixed(2)}</strong>, already
-            in your balance.
+            {" "}Your prize of{" "}
+            <strong>{prizeAmount!.toFixed(2)} USDC</strong> has already been
+            credited to your balance.
           </>
         ) : (
-          <> the next leaderboard resets now — get back in.</>
+          <>
+            {" "}The next leaderboard period is already running — you can
+            jump back in any time.
+          </>
         )}
       </Text>
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/leaderboard" style={buttonStyle}>
-          view leaderboard →
+          View the leaderboard
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        prize pool is a % of the prior week&apos;s GGR. bigger weeks → bigger
-        pools.
+        The prize pool is a percentage of the prior week&apos;s gross gaming
+        revenue — bigger weeks mean bigger pools.
       </Text>
     </Layout>
   );

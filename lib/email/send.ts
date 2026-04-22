@@ -63,7 +63,12 @@ export async function sendEmail(args: SendArgs): Promise<SendResult> {
     if (existing) return { sent: false, skipped: "already_sent" };
   }
 
+  // Render both HTML and a plain-text fallback. Multipart messages score
+  // better with spam filters (Gmail/Outlook both use plaintext presence as a
+  // legitimacy signal) and any client that doesn't render HTML (or chooses
+  // not to, like text-mode Apple Mail) gets readable copy.
   const html = await render(args.react);
+  const text = await render(args.react, { plainText: true });
 
   // Gmail + Yahoo bulk sender requirements: every non-transactional email
   // needs one-click unsubscribe. We attach both even on transactional
@@ -88,6 +93,7 @@ export async function sendEmail(args: SendArgs): Promise<SendResult> {
       replyTo: EMAIL_REPLY_TO,
       subject: args.subject,
       html,
+      text,
       headers,
     });
 

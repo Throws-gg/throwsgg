@@ -270,7 +270,7 @@ export async function POST(request: NextRequest) {
           : `sol-${newMaxSlot}`;
       sendEmail({
         to: emailUser.email,
-        subject: `Deposit received — $${totalCreditedUsd.toFixed(2)} credited`,
+        subject: `Your deposit has been credited`,
         category: "transactional",
         userId,
         idempotencyKey: `deposit:${latestSig}`,
