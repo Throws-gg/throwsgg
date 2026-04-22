@@ -21,6 +21,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    if (typeof raceId !== "string" || typeof horseId !== "number") {
+      return NextResponse.json({ error: "Invalid identifier" }, { status: 400 });
+    }
+
+    // Strict numeric check — no NaN, Infinity, or numeric-string coercion.
+    // Client has no business sending anything but a finite positive number.
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ error: "Invalid bet amount" }, { status: 400 });
+    }
+
     if (amount < 0.10) {
       return NextResponse.json({ error: "Minimum bet is $0.10" }, { status: 400 });
     }

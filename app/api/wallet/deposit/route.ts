@@ -91,14 +91,21 @@ export async function POST(request: NextRequest) {
       const initialUsdcTransfers = await getUsdcTransfersIn(walletAddress, { limit: 1 });
       const initialSlot = initialUsdcTransfers[0]?.slot ?? 0;
 
-      await supabase.from("deposit_addresses").insert({
-        user_id: userId,
-        chain: "solana",
-        address: walletAddress,
-        derivation_index: 0,
-        last_processed_slot: initialSlot,
-        sol_baseline_lamports: balances.solLamports,
-      });
+      // Upsert so concurrent first-call attempts don't throw 23505 — second
+      // caller gets a silent no-op and the existing row holds.
+      await supabase
+        .from("deposit_addresses")
+        .upsert(
+          {
+            user_id: userId,
+            chain: "solana",
+            address: walletAddress,
+            derivation_index: 0,
+            last_processed_slot: initialSlot,
+            sol_baseline_lamports: balances.solLamports,
+          },
+          { onConflict: "user_id,chain", ignoreDuplicates: true },
+        );
 
       return NextResponse.json({
         status: "baseline_set",

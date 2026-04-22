@@ -21,6 +21,7 @@ export default function Welcome({
   wageringRequired = 60,
   bonusExpiresAt,
 }: WelcomeProps) {
+  const hasBonus = bonusAmount > 0;
   const expiresText = bonusExpiresAt
     ? new Date(bonusExpiresAt).toLocaleDateString("en-US", {
         month: "short",
@@ -35,11 +36,18 @@ export default function Welcome({
         minutes — 480 races a day, 16 horses with real form data, and every
         outcome is provably fair.
       </Text>
-      <Text style={textStyle}>
-        We&apos;ve added a {bonusAmount} USDC welcome bonus to your account.
-        Wager {wageringRequired} USDC (three times the bonus) and it converts
-        to withdrawable cash. The bonus expires {expiresText}.
-      </Text>
+      {hasBonus ? (
+        <Text style={textStyle}>
+          We&apos;ve added a {bonusAmount} USDC welcome bonus to your account.
+          Wager {wageringRequired} USDC (three times the bonus) and it converts
+          to withdrawable cash. The bonus expires {expiresText}.
+        </Text>
+      ) : (
+        <Text style={textStyle}>
+          Deposit USDC or SOL on Solana to start betting. Deposits usually land
+          within a minute.
+        </Text>
+      )}
       <Section style={{ margin: "24px 0" }}>
         <Button href="https://throws.gg/racing" style={buttonStyle}>
           Open the next race

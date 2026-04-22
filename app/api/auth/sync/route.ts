@@ -281,7 +281,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Fire welcome email (best-effort, don't block signup response)
+    // Fire welcome email (best-effort, don't block signup response).
+    // If the bonus WASN'T granted (cap reached, dupe fingerprint/email, or
+    // disabled), pass bonusAmount=0 so the template suppresses the bonus copy.
+    // Otherwise users who miss the first-100 cap get an email promising $20
+    // they never received.
     if (email) {
       sendEmail({
         to: email,
@@ -291,10 +295,12 @@ export async function POST(request: NextRequest) {
         idempotencyKey: `welcome:${u.id}`,
         react: Welcome({
           username: u.username,
-          bonusAmount: bonusResult.granted ? bonusResult.bonus_amount : 20,
+          bonusAmount: bonusResult.granted
+            ? bonusResult.bonus_amount
+            : 0,
           wageringRequired: bonusResult.granted
             ? bonusResult.wagering_required
-            : 60,
+            : 0,
           bonusExpiresAt: bonusResult.granted
             ? bonusResult.expires_at
             : undefined,
