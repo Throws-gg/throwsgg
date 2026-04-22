@@ -14,7 +14,10 @@ export function DepositPanel() {
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"buy" | "send">("buy");
+  // Default to "send" — our audience is crypto-native, they already have
+  // wallets and would bounce on MoonPay KYC. Card-buy stays one tab away
+  // for users who genuinely need an onramp.
+  const [activeTab, setActiveTab] = useState<"buy" | "send">("send");
 
   const solanaWallet = wallets.find(
     (w) => (w as unknown as { walletClientType?: string }).walletClientType === "privy" ||
@@ -71,19 +74,8 @@ export function DepositPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Tab selector */}
+      {/* Tab selector — Send Crypto first (default). Card-buy is secondary. */}
       <div className="flex rounded-xl bg-white/[0.03] border border-white/[0.06] p-1">
-        <button
-          onClick={() => setActiveTab("buy")}
-          className={cn(
-            "flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all",
-            activeTab === "buy"
-              ? "bg-white/[0.08] text-white shadow-sm"
-              : "text-white/40 hover:text-white/60"
-          )}
-        >
-          Buy with Card
-        </button>
         <button
           onClick={() => setActiveTab("send")}
           className={cn(
@@ -94,6 +86,17 @@ export function DepositPanel() {
           )}
         >
           Send Crypto
+        </button>
+        <button
+          onClick={() => setActiveTab("buy")}
+          className={cn(
+            "flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all",
+            activeTab === "buy"
+              ? "bg-white/[0.08] text-white shadow-sm"
+              : "text-white/40 hover:text-white/60"
+          )}
+        >
+          Buy with Card
         </button>
       </div>
 
