@@ -50,7 +50,7 @@ export default function Welcome({
         2,000 USDC, and withdrawals usually land in under five minutes.
       </Text>
       <Text style={mutedStyle}>
-        Questions? Just reply — I read every message.
+        Questions? Just reply to this email and we&apos;ll get back to you.
       </Text>
     </Layout>
   );

@@ -22,8 +22,8 @@ export default function ReactivationD14({
       <Text style={headingStyle}>Checking in, {username}</Text>
       <Text style={textStyle}>
         It&apos;s been two weeks since your last bet. If throws.gg
-        isn&apos;t working for you, I&apos;d genuinely like to know why —
-        hit reply and tell me. I read every email personally.
+        isn&apos;t working for you, we&apos;d genuinely like to know why —
+        hit reply and tell us. We read every email.
       </Text>
       {balance && balance > 0 ? (
         <Text style={textStyle}>

@@ -33,8 +33,8 @@ export default function FirstDepositNudge({
         </Button>
       </Section>
       <Text style={mutedStyle}>
-        Not ready? Reply and tell me what&apos;s stopping you — I read every
-        email personally.
+        Not ready? Just reply and let us know what&apos;s holding you back —
+        we read every email.
       </Text>
     </Layout>
   );

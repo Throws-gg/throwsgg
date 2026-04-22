@@ -22,7 +22,7 @@ export default function ReactivationD30({
       <Text style={headingStyle}>One last check-in, {username}</Text>
       <Text style={textStyle}>
         It&apos;s been a month since your last visit to throws.gg. This is
-        the last time I&apos;ll reach out for a while. If you want to come
+        the last time we&apos;ll reach out for a while. If you want to come
         back, the door&apos;s always open. If not, no hard feelings.
       </Text>
       {balance && balance > 0 ? (
