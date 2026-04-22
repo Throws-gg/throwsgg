@@ -10,6 +10,7 @@ import {
   History,
   Users,
   LogOut,
+  BookOpen,
 } from "lucide-react";
 import { useUserStore } from "@/stores/userStore";
 import { useAuthActions } from "@/lib/auth/auth-context";
@@ -248,6 +249,18 @@ function UserMenu() {
           >
             <Wallet className="h-4 w-4 text-violet group-focus/item:text-magenta transition-colors" />
             <span className="ml-1">Wallet</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="group/item cursor-pointer rounded-md
+              px-2.5 py-2 my-0.5
+              text-[11px] font-black uppercase tracking-[0.08em]
+              text-foreground/80
+              focus:bg-violet/15 focus:text-foreground
+              transition-colors"
+            onClick={() => router.push("/horses")}
+          >
+            <BookOpen className="h-4 w-4 text-violet group-focus/item:text-magenta transition-colors" />
+            <span className="ml-1">Form Guide</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             className="group/item cursor-pointer rounded-md

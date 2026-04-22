@@ -234,6 +234,42 @@ Phase order (each phase can be picked up by a fresh terminal; check the work log
 
 Append-only. Newest entries at the top. Keep bullets terse.
 
+### 2026-04-22 — Terminal B (form guide + horse profiles) **PRE-PUSH**
+
+Surfaced the rich horse-stats data (already on the `horses` table from migrations 006 + 008) as user-facing pages. Two new routes, two new API endpoints, navbar wiring, and per-horse linking from the racing card. No migrations.
+
+**Why:** every horse has speed/stamina/form/consistency/career W-L-P-S/last 5/distance × ground × gate breakdowns sitting in the DB but no pages to view it. Big differentiator vs slot-style competitors — "data sicko" engagement loop unique to virtual horse racing. Also unblocks shareable assets (tweet a horse page link instead of just a name).
+
+**Files (local, ready for push):**
+- `app/api/horses/route.ts` — public, unauthed, `force-dynamic` + `revalidate: 60`. Returns all 16 with computed `winPct` / `itmPct`. Sorts by `speed_rating` server-side. ~60s cached so the index isn't a hot read on every visit.
+- `app/api/horses/[slug]/route.ts` — public, unauthed. Returns the horse + last 12 settled race entries via JOIN with `races` (race_number, distance, ground, settled_at). Filtered to `races.status = 'settled'` so in-flight races don't surface as "—" rows.
+- `app/(game)/horses/page.tsx` — full form guide. Sortable (Speed Rating / Win % / ITM % / Form / Name) + ground filter (firm/good/soft/heavy/all). Card grid renders sprite + tagline + last-5-results pills + W%/ITM%/races/form/ground row. Links each card to `/horse/[slug]`.
+- `app/(game)/horse/[slug]/page.tsx` — detail page. Hero (sprite + tagline + tier badge + ground preference + days-since), big-stat grid (Starts/Win%/ITM%/Avg Finish), profile bars (speed/stamina/form/consistency), recent-form pills, three breakdown tables (by Distance / by Ground / by Gate), last-12-race history table with finish color-coded medal pills. Back link + CTA to `/racing`.
+- `components/layout/Navbar.tsx` — added "Form Guide" item with `BookOpen` icon to the user dropdown menu, between Wallet and Bet History.
+- `components/layout/MobileNav.tsx` — added new "form" tab between Racing and Wallet (5 tabs total now). Trimmed label width (`px-2 py-1.5`, `text-[10px]`) and shortened "referrals" → "refer" to keep the bar from overflowing on narrow phones.
+- `app/(game)/racing/page.tsx` — added a discreet info-circle icon link next to each horse name in the race card. Links to `/horse/[slug]`. Uses `e.stopPropagation()` so clicking it doesn't open the bet modal. Maintains the bet flow as the primary action.
+
+**Design notes:**
+- Tone follows the updated `feedback_tone_of_voice.md` ("confident + light personality"). No "LFG"/"absolute unit" copy on the form pages — straight stats display.
+- Reuses `HorseSprite` component for both list and detail. No new sprite-rendering code.
+- Card visual language matches `/wallet` and `/profile` (`#0e0e16` backgrounds, violet-magenta gradient accents).
+- Detail page falls back gracefully when fields are missing — empty `distance_record` / `gate_record` show "No data yet." instead of an empty table.
+
+**No env vars. No migrations. No new dependencies.**
+
+**Operator post-push checklist:**
+1. Visit `/horses` — should list all 16 horses sorted by speed rating, with sprites, taglines, and last-5 result pills.
+2. Click any horse — `/horse/[slug]` should load with stats + recent races (will be sparse on a fresh DB; race count grows as the cron settles races).
+3. From `/racing`, the small ⓘ icon next to each horse name should open `/horse/[slug]` without triggering the bet modal.
+4. Mobile: bottom nav should now show 5 tabs (racing / form / wallet / refer / profile). Verify no overflow on iPhone SE width.
+5. Spot check `/api/horses` and `/api/horses/thunder-edge` return 200 with the expected shape.
+
+**Known follow-ups:**
+- "Follow horse" feature (notifications when a followed horse is in the next race) — flagged in CLAUDE.md POST-LAUNCH list. Schema doesn't exist yet; would need a `user_horse_follows` table.
+- Per-horse share-to-X cards (similar to `RaceWinCard`) — quick win for marketing once horse pages exist.
+- The `/profile` VIP_TIERS array is still out of sync with rakeback tiers (pre-existing issue noted in 167d921 entry). Same flag still applies — unify when whoever owns that component is ready.
+- Removed the existing `/profile` "POST-LAUNCH: Form guide page" line from the launch checklist below — done now.
+
 ### 2026-04-22 — Terminal A (email deliverability + copy rewrite) **PRE-PUSH**
 
 Connor reported the welcome email landing in spam (Gmail) and arriving with delay. Diagnosed three contributing factors: (a) all-lowercase / "degen" tone in subjects + body raises spam scores on a brand-new sending domain, (b) HTML-only sends with no plaintext part, (c) `no-reply@` From address. Rewrote all 15 templates and tightened the send pipeline.
@@ -646,7 +682,6 @@ All are `CREATE OR REPLACE FUNCTION` or `ADD COLUMN IF NOT EXISTS` style — saf
 
 ### POST-LAUNCH (nice to have)
 
-- Form guide page — Horse profiles exist as data but no dedicated /horses or /horse/[slug] page
 - Tipster leaderboard — Schema supports it, UI not built
 - Horse following + notifications — Not started
 - Prediction streaks + badges — Not started

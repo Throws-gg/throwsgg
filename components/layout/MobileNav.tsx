@@ -64,10 +64,20 @@ function ProfileIcon({ className }: { className?: string }) {
   );
 }
 
+function FormIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  );
+}
+
 const navItems = [
   { href: "/racing", label: "racing", Icon: RacingIcon },
+  { href: "/horses", label: "form", Icon: FormIcon },
   { href: "/wallet", label: "wallet", Icon: WalletIcon },
-  { href: "/referrals", label: "referrals", Icon: ReferralIcon },
+  { href: "/referrals", label: "refer", Icon: ReferralIcon },
   { href: "/profile", label: "profile", Icon: ProfileIcon },
 ];
 
@@ -85,7 +95,7 @@ export function MobileNav() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex flex-col items-center gap-0.5 px-4 py-1.5 text-[11px] font-semibold transition-colors relative",
+                "flex flex-col items-center gap-0.5 px-2 py-1.5 text-[10px] font-semibold transition-colors relative",
                 isActive
                   ? "text-violet"
                   : "text-muted-foreground hover:text-foreground"

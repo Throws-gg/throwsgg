@@ -491,6 +491,27 @@ export default function RacingPage() {
                     {entry.gatePosition}.
                   </span>
                   <span className="text-sm font-semibold truncate">{entry.horse.name}</span>
+                  <a
+                    href={`/horse/${entry.horse.slug}`}
+                    onClick={(e) => e.stopPropagation()}
+                    title={`View form for ${entry.horse.name}`}
+                    className="shrink-0 text-white/30 hover:text-violet/90 transition-colors"
+                    aria-label={`Form guide for ${entry.horse.name}`}
+                  >
+                    <svg
+                      className="w-3 h-3"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </a>
                   {isResults && !isRacing && entry.finishPosition === 1 && (
                     <span className="text-[10px] bg-green/20 text-green px-1.5 py-0.5 rounded font-bold">WIN</span>
                   )}
