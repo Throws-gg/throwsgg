@@ -8,6 +8,7 @@ import { AuthProvider } from "@/lib/auth/auth-context";
 import { useUserStore } from "@/stores/userStore";
 import { initPostHog, identify, resetAnalytics } from "@/lib/analytics/posthog";
 import { getVisitorId } from "@/lib/fingerprint/client";
+import { useGlobalBalancePoller } from "@/hooks/useGlobalBalancePoller";
 
 const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const isConfigured = privyAppId && privyAppId !== "your_privy_app_id";
@@ -94,6 +95,17 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
           referralCode: data.user.referralCode,
         });
 
+        // Fire-and-forget: ensure the user's USDC ATA exists on-chain so
+        // deposits from external wallets land instantly. Idempotent on the
+        // server — no-op if the ATA already exists or was initialized before.
+        // Costs ~0.002 SOL (hot wallet) per new user, one-time.
+        fetch("/api/wallet/init-ata", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {
+          // Safe to drop — the next /auth/sync tick retries.
+        });
+
         // Identify the user in analytics. Raw money figures get bucketed
         // into tiers — PostHog holds segments, not balances. Keeps us safe
         // from PII-in-third-party-analytics for a licensed gambling product.
@@ -168,6 +180,11 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
     clearUser();
     resetAnalytics();
   }, [privyLogout, clearUser]);
+
+  // Global 20s balance + deposit poller. Runs anywhere in the app whenever
+  // the user is authenticated — fixes the "balance doesn't update until
+  // page refresh" bug on /racing, /profile, /horses, etc.
+  useGlobalBalancePoller();
 
   return (
     <AuthProvider login={login} logout={handleLogout}>

@@ -140,11 +140,24 @@ export function DepositPanel() {
         </div>
       )}
 
-      {/* Monitoring indicator */}
-      {activeTab === "send" && checking && (
+      {/* Monitoring indicator — always visible on the send tab so users know
+          we're actively watching for their tx. The global poller checks
+          every 20s regardless of this component being mounted. */}
+      {activeTab === "send" && (
         <div className="flex items-center justify-center gap-2 py-1">
-          <div className="w-2 h-2 rounded-full bg-cyan animate-pulse" />
-          <span className="text-white/25 text-[10px]">Monitoring for deposits...</span>
+          <div className={cn(
+            "w-2 h-2 rounded-full",
+            checking ? "bg-cyan animate-pulse" : "bg-green/60 animate-pulse"
+          )} />
+          <span className="text-white/30 text-[10px]">
+            {checking ? "Checking for deposits…" : "Monitoring — balance updates automatically"}
+          </span>
+          <button
+            onClick={refresh}
+            className="text-[10px] text-cyan/60 hover:text-cyan underline ml-2"
+          >
+            check now
+          </button>
         </div>
       )}
 
