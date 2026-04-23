@@ -48,20 +48,30 @@ export function HorseSprite({ slug, size = 32, className }: HorseSpriteProps) {
       ctx.clearRect(0, 0, size, size);
       ctx.imageSmoothingEnabled = false;
 
-      // Crop into the center of the frame so the horse fills more space
-      // Full frame is 64x48 but the horse only occupies roughly the center 36x36
-      const cropX = 14; // trim empty space from left
-      const cropY = 6;  // trim empty space from top
-      const cropW = 36; // cropped width
-      const cropH = 38; // cropped height
+      // Crop a tight window around the horse that keeps the legs intact.
+      // The full frame is 64×48 but the horse sits off-centre with empty space
+      // on the left + top. We crop to 40×40 starting at (12, 4) — this catches
+      // the full body + hooves (which extend to y≈46) without trimming.
+      const cropX = 12;
+      const cropY = 4;
+      const cropW = 40;
+      const cropH = 40;
 
       const srcX = cropX;
       const srcY = SPRITE.ROW_IDLE_RIGHT + cropY;
 
-      // Fill the square canvas with the cropped region
-      if (bodyImg.complete) ctx.drawImage(bodyImg, srcX, srcY, cropW, cropH, 0, 0, size, size);
-      if (hairImg.complete) ctx.drawImage(hairImg, srcX, srcY, cropW, cropH, 0, 0, size, size);
-      if (faceImg?.complete) ctx.drawImage(faceImg, srcX, srcY, cropW, cropH, 0, 0, size, size);
+      // Letterbox the horse into the square canvas so it never gets squashed.
+      // The crop is already square (40×40), so this is a 1:1 scale — but we
+      // render slightly inset so the hooves don't kiss the bottom edge.
+      const inset = Math.round(size * 0.04);
+      const drawW = size - inset * 2;
+      const drawH = size - inset * 2;
+      const dx = inset;
+      const dy = inset;
+
+      if (bodyImg.complete) ctx.drawImage(bodyImg, srcX, srcY, cropW, cropH, dx, dy, drawW, drawH);
+      if (hairImg.complete) ctx.drawImage(hairImg, srcX, srcY, cropW, cropH, dx, dy, drawW, drawH);
+      if (faceImg?.complete) ctx.drawImage(faceImg, srcX, srcY, cropW, cropH, dx, dy, drawW, drawH);
     }
 
     // Draw immediately if loaded, otherwise wait

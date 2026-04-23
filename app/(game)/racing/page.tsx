@@ -467,93 +467,154 @@ export default function RacingPage() {
         </div>
 
         <div className="divide-y divide-white/[0.04]">
-          {sortedEntries.map((entry) => (
-            <button
-              key={entry.id}
-              onClick={() => isBetting ? setSelectedHorse(entry) : null}
-              disabled={!isBetting}
-              className={cn(
-                "group w-full flex items-center gap-3 pr-4 py-3 transition-all text-left relative",
-                isResults && entry.finishPosition === 1 && !isRacing && "bg-green/[0.06]",
-                isBetting && "hover:bg-white/[0.04] active:bg-white/[0.06]"
-              )}
-            >
-              {/* Left colour bar */}
-              <div className="w-[3px] self-stretch rounded-r-full shrink-0"
-                style={{ backgroundColor: entry.horse.color, opacity: isResults && entry.finishPosition !== 1 ? 0.3 : 0.7 }} />
+          {sortedEntries.map((entry) => {
+            const h = entry.horse;
+            // Find the shortest odds in the field so we can give the favourite
+            // a clear visual hierarchy — the favourite's odds render larger
+            // than the rest of the field, longshots render smaller.
+            const minOdds = Math.min(...currentRace.entries.map(e => e.currentOdds));
+            const isFav = entry.currentOdds === minOdds;
+            const isLongshot = entry.currentOdds >= 15;
+            // Ground match — colour the silks ring if this horse prefers today's going.
+            const groundMatch = h.groundPreference === currentRace.ground;
+            // Implied win % from decimal odds.
+            const impliedPct = entry.currentOdds > 0 ? (100 / entry.currentOdds) : 0;
 
-              <HorseSprite slug={entry.horse.slug} size={32} className="shrink-0" />
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold shrink-0"
-                    style={{ color: entry.horse.color }}>
-                    {entry.gatePosition}.
+            return (
+              <button
+                key={entry.id}
+                onClick={() => isBetting ? setSelectedHorse(entry) : null}
+                disabled={!isBetting}
+                className={cn(
+                  "group w-full flex items-center gap-3 px-3 py-3 transition-all text-left relative",
+                  isResults && entry.finishPosition === 1 && !isRacing && "bg-green/[0.06]",
+                  isBetting && "hover:bg-white/[0.04] active:bg-white/[0.06]"
+                )}
+              >
+                {/* Saddle-cloth gate number — filled square in silks colour with white numeral. */}
+                <div
+                  className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center shadow-[inset_0_-2px_0_rgba(0,0,0,0.25)]"
+                  style={{ backgroundColor: entry.horse.color }}
+                >
+                  <span className="text-sm font-black text-white leading-none drop-shadow-[0_1px_0_rgba(0,0,0,0.35)]">
+                    {entry.gatePosition}
                   </span>
-                  <span className="text-sm font-semibold truncate">{entry.horse.name}</span>
-                  <a
-                    href={`/horse/${entry.horse.slug}`}
-                    onClick={(e) => e.stopPropagation()}
-                    title={`View form for ${entry.horse.name}`}
-                    className="shrink-0 text-white/30 hover:text-violet/90 transition-colors"
-                    aria-label={`Form guide for ${entry.horse.name}`}
-                  >
-                    <svg
-                      className="w-3 h-3"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2.5}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                </div>
+
+                {/* Horse sprite — bumped to 56px, with a subtle silks ring when
+                    the horse prefers today's ground. */}
+                <div
+                  className={cn(
+                    "shrink-0 rounded-full p-[2px]",
+                    groundMatch ? "ring-1" : ""
+                  )}
+                  style={groundMatch ? { boxShadow: `inset 0 0 0 1.5px ${h.color}55` } : undefined}
+                >
+                  <HorseSprite slug={entry.horse.slug} size={56} />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-semibold truncate">{h.name}</span>
+                    {isFav && !isResults && (
+                      <span className="text-[8px] font-black tracking-wider text-amber-400/70 uppercase shrink-0">FAV</span>
+                    )}
+                    {isLongshot && !isResults && !isFav && (
+                      <span className="text-[8px] font-black tracking-wider text-green/60 uppercase shrink-0">LONG</span>
+                    )}
+                    {groundMatch && !isResults && (
+                      <span
+                        title={`Prefers ${h.groundPreference} — today is ${currentRace.ground}`}
+                        className="shrink-0 w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: h.color }}
+                      />
+                    )}
+                    <a
+                      href={`/horse/${entry.horse.slug}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title={`View form for ${h.name}`}
+                      className="shrink-0 text-white/25 hover:text-violet/90 transition-colors"
+                      aria-label={`Form guide for ${h.name}`}
                     >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 16v-4" />
-                      <path d="M12 8h.01" />
-                    </svg>
-                  </a>
-                  {isResults && !isRacing && entry.finishPosition === 1 && (
-                    <span className="text-[10px] bg-green/20 text-green px-1.5 py-0.5 rounded font-bold">WIN</span>
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4" />
+                        <path d="M12 8h.01" />
+                      </svg>
+                    </a>
+                    {isResults && !isRacing && entry.finishPosition === 1 && (
+                      <span className="text-[10px] bg-green/20 text-green px-1.5 py-0.5 rounded font-bold">WIN</span>
+                    )}
+                  </div>
+
+                  {/* Form pills — last 5 finishes, most recent on the left.
+                      Replaces the tagline as the primary sub-text; the tagline
+                      is still available inside the bet modal. */}
+                  {h.last5Results.length > 0 ? (
+                    <div className="flex items-center gap-1 mt-1">
+                      {h.last5Results.slice(0, 5).map((r, i) => (
+                        <span
+                          key={i}
+                          className={cn(
+                            "text-[9px] font-black w-4 h-4 rounded-[3px] flex items-center justify-center leading-none tabular-nums",
+                            r.position === 1 && "bg-green/20 text-green",
+                            r.position === 2 && "bg-white/[0.08] text-white/70",
+                            r.position === 3 && "bg-white/[0.05] text-white/55",
+                            r.position > 3 && "bg-white/[0.02] text-white/25"
+                          )}
+                        >
+                          {r.position > 9 ? "9" : r.position}
+                        </span>
+                      ))}
+                      <span className="text-[9px] text-white/25 ml-1">form</span>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-white/25 italic mt-0.5 truncate">{getHorseIdentity(h.slug).tagline}</p>
                   )}
                 </div>
-                <p className="text-[10px] text-white/30 italic truncate ml-3.5">{getHorseIdentity(entry.horse.slug).tagline}</p>
-              </div>
 
-              <div className="text-right shrink-0 flex items-center gap-2">
-                {isResults && !isRacing && entry.finishPosition ? (
-                  <>
-                    <span className="text-[11px] font-mono text-white/35">{entry.currentOdds.toFixed(2)}</span>
-                    <span className={cn("text-lg font-black",
-                      entry.finishPosition === 1 && "text-green",
-                      entry.finishPosition > 1 && entry.finishPosition <= 3 && "text-white/80",
-                      entry.finishPosition > 3 && "text-white/30"
-                    )}>
-                      {entry.finishPosition}
-                      <span className="text-[10px]">
-                        {entry.finishPosition === 1 ? "st" : entry.finishPosition === 2 ? "nd" : entry.finishPosition === 3 ? "rd" : "th"}
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  {isResults && !isRacing && entry.finishPosition ? (
+                    <>
+                      <span className="text-[11px] font-mono text-white/35">{entry.currentOdds.toFixed(2)}</span>
+                      <span className={cn("text-lg font-black",
+                        entry.finishPosition === 1 && "text-green",
+                        entry.finishPosition > 1 && entry.finishPosition <= 3 && "text-white/80",
+                        entry.finishPosition > 3 && "text-white/30"
+                      )}>
+                        {entry.finishPosition}
+                        <span className="text-[10px]">
+                          {entry.finishPosition === 1 ? "st" : entry.finishPosition === 2 ? "nd" : entry.finishPosition === 3 ? "rd" : "th"}
+                        </span>
                       </span>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className={cn("text-lg font-black font-mono",
-                      entry.currentOdds < 3 && "text-amber-400",
-                      entry.currentOdds >= 3 && entry.currentOdds < 8 && "text-white/80",
-                      entry.currentOdds >= 8 && "text-green"
-                    )}>
-                      {entry.currentOdds.toFixed(2)}
-                    </span>
-                    {/* BET affordance on hover */}
-                    {isBetting && (
-                      <span className="text-[9px] text-violet/0 group-hover:text-violet/70 transition-colors font-bold uppercase w-6">
-                        BET
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            </button>
-          ))}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-col items-end">
+                        <span className={cn("font-black font-mono leading-none tabular-nums",
+                          // Visual hierarchy — favourite renders bigger + hotter,
+                          // midfield renders standard, longshots shrink + cool.
+                          isFav && "text-2xl text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.25)]",
+                          !isFav && entry.currentOdds < 8 && "text-xl text-white/85",
+                          !isFav && entry.currentOdds >= 8 && "text-base text-green/80"
+                        )}>
+                          {entry.currentOdds.toFixed(2)}
+                        </span>
+                        <span className="text-[8px] text-white/25 font-mono mt-0.5 tabular-nums">
+                          {impliedPct.toFixed(0)}%
+                        </span>
+                      </div>
+                      {isBetting && (
+                        <span className="text-[9px] text-violet/0 group-hover:text-violet/70 transition-colors font-bold uppercase w-6">
+                          BET
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         {/* Connect wallet prompt at bottom of race card */}
