@@ -1,4 +1,4 @@
-import { PrivyClient } from "@privy-io/server-auth";
+import { PrivyClient, type WalletWithMetadata } from "@privy-io/server-auth";
 
 let privyClient: PrivyClient | null = null;
 
@@ -33,6 +33,35 @@ export async function verifyAuthToken(
     const verified = await client.verifyAuthToken(token);
     return { userId: verified.userId };
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Look up the Privy embedded Solana wallet address for a user.
+ *
+ * This is the race-free way to get the wallet — the client-side `useWallets`
+ * hook populates asynchronously after auth, which caused the "users.wallet_address
+ * is null" bug for 10/11 signups. The Privy server API is authoritative: the
+ * user exists in Privy's system the moment verifyAuthToken succeeds, and their
+ * embedded wallet is always present on the `linkedAccounts` array.
+ *
+ * Returns null if the user has no Solana embedded wallet yet (shouldn't happen
+ * in prod since we force email+google login only and Privy auto-creates the
+ * wallet on signup).
+ */
+export async function getSolanaEmbeddedAddress(privyDid: string): Promise<string | null> {
+  try {
+    const client = getPrivyClient();
+    const user = await client.getUserById(privyDid);
+    const embedded = user.linkedAccounts.find((a): a is WalletWithMetadata =>
+      a.type === "wallet" &&
+      (a as WalletWithMetadata).walletClientType === "privy" &&
+      (a as WalletWithMetadata).chainType === "solana"
+    );
+    return embedded?.address ?? null;
+  } catch (err) {
+    console.error("getSolanaEmbeddedAddress failed:", err);
     return null;
   }
 }

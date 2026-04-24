@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuthToken, isDevMode } from "@/lib/auth/privy";
+import { verifyAuthToken, isDevMode, getSolanaEmbeddedAddress } from "@/lib/auth/privy";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 import { verifyFingerprint } from "@/lib/fingerprint/server";
@@ -63,10 +63,21 @@ export async function POST(request: NextRequest) {
   const referralCode = body.referralCode || null;
   const fingerprint = body.fingerprint || null;
   const email = body.email || null;
-  const solanaAddress =
+
+  // Get the user's Privy embedded Solana address authoritatively from the
+  // Privy server API. We don't trust the client-supplied body.solanaAddress
+  // because `useWallets()` on the client races with auth completion — it was
+  // returning empty at sync time for 10/11 real signups, resulting in null
+  // wallet_address rows and broken deposit detection.
+  //
+  // Body fallback is kept as defence-in-depth in case the Privy server lookup
+  // ever 5xxs — the write-once semantics below ensure no hijack risk.
+  const serverSolanaAddress = await getSolanaEmbeddedAddress(privyId);
+  const bodySolanaAddress =
     typeof body.solanaAddress === "string" && body.solanaAddress.length >= 32 && body.solanaAddress.length <= 44
       ? body.solanaAddress
       : null;
+  const solanaAddress = serverSolanaAddress || bodySolanaAddress;
   const clientIp =
     request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
     request.headers.get("x-real-ip") ||

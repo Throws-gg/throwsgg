@@ -18,7 +18,13 @@ const isConfigured = privyAppId && privyAppId !== "your_privy_app_id";
  */
 function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, login, logout: privyLogout, getAccessToken } = usePrivy();
-  const { wallets } = useWallets();
+  // useWallets() from @privy-io/react-auth/solana has its own ready flag.
+  // We previously only depended on `ready` from usePrivy(), which fired the
+  // sync effect before the Solana wallets array had populated — resulting in
+  // a null solanaAddress for every signup (10/11 real users affected).
+  // The server-side sync also looks this up authoritatively via the Privy
+  // server SDK, so this is belt-and-braces.
+  const { ready: walletsReady, wallets } = useWallets();
   const setUser = useUserStore((s) => s.setUser);
   const clearUser = useUserStore((s) => s.logout);
 
@@ -63,8 +69,11 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
         linkedEmail ||
         null;
 
-      // The Privy embedded Solana wallet — persisted server-side as the user's
-      // deposit address. Write-once on the server (see /api/auth/sync).
+      // Find the Privy embedded Solana wallet. useWallets() may also return
+      // external wallets (Phantom etc.) if the user connected one, so we
+      // filter by walletClientType. The server also looks this up
+      // authoritatively via the Privy server SDK — this body field is a
+      // hint / fallback only.
       const solanaWallet = wallets.find(
         (w) => (w as unknown as { walletClientType?: string }).walletClientType === "privy" ||
                w.standardWallet?.name === "Privy"
@@ -166,14 +175,19 @@ function PrivyAuthBridge({ children }: { children: React.ReactNode }) {
   }, [ready, authenticated, user, getAccessToken, setUser, wallets]);
 
   useEffect(() => {
-    if (ready && authenticated && user) {
+    // Wait for BOTH Privy auth AND the Solana wallets hook to be ready before
+    // syncing. Without `walletsReady`, useSolanaWallets().wallets is still
+    // empty when this effect fires, and the sync POSTs a null solanaAddress.
+    // The server-side sync has a fallback lookup via the Privy API, but we
+    // also gate here so the client sends the right hint when it can.
+    if (ready && authenticated && user && walletsReady) {
       initPostHog(); // Only load PostHog JS when user is authenticated
       syncUser();
     } else if (ready && !authenticated) {
       clearUser();
       resetAnalytics();
     }
-  }, [ready, authenticated, user]);
+  }, [ready, authenticated, user, walletsReady]);
 
   const handleLogout = useCallback(async () => {
     await privyLogout();
