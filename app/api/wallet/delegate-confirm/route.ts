@@ -23,11 +23,17 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // Verify with Privy that the delegation actually exists.
-  const live = await isWalletDelegated(authed.privyId);
+  // Verify with Privy that the signer was actually attached. There's a brief
+  // eventual-consistency window after addSigners() resolves — the read-side
+  // can take 1-3s to reflect the change. Poll up to ~3s before giving up.
+  let live = await isWalletDelegated(authed.privyId);
+  for (let i = 0; i < 6 && !live.delegated; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    live = await isWalletDelegated(authed.privyId);
+  }
   if (!live.delegated) {
     return NextResponse.json(
-      { error: "delegation_not_found", message: "Delegation not yet visible to Privy. Try again." },
+      { error: "delegation_not_found", message: "Authorization didn't propagate. Try again in a moment." },
       { status: 409 }
     );
   }
