@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { usePrivy, useDelegatedActions } from "@privy-io/react-auth";
+import { usePrivy, useSigners } from "@privy-io/react-auth";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { useFundWallet } from "@privy-io/react-auth/solana";
 import { useDepositMonitor } from "@/hooks/useDepositMonitor";
@@ -14,7 +14,7 @@ export function DepositPanel() {
   const { ready, authenticated } = usePrivy();
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
-  const { delegateWallet } = useDelegatedActions();
+  const { addSigners } = useSigners();
   const authedFetch = useAuthedFetch();
   const [copied, setCopied] = useState(false);
   const [delegated, setDelegated] = useState<boolean | null>(null);
@@ -67,16 +67,37 @@ export function DepositPanel() {
 
   const handleDelegate = useCallback(async () => {
     if (!walletAddress || delegating) return;
+
+    // TEE wallets use addSigners (not delegateWallet — that's the deprecated
+    // on-device API). The signerId is our "Sweeping Key" authorization key
+    // from the Privy dashboard; policyIds restricts what that key can sign
+    // for this wallet (USDC -> hot wallet ATA only, transferChecked only).
+    // Both IDs are public (NEXT_PUBLIC_*) — they're identifiers, not secrets.
+    const signerId = process.env.NEXT_PUBLIC_PRIVY_SIGNER_ID;
+    const policyId = process.env.NEXT_PUBLIC_PRIVY_SWEEP_POLICY_ID;
+    if (!signerId || !policyId) {
+      setDelegationError(
+        "Authorization is misconfigured. Please contact support."
+      );
+      return;
+    }
+
     setDelegating(true);
     setDelegationError(null);
     try {
-      // Privy pops its delegation modal — user clicks "Approve". This is
-      // an explicit, one-time consent. Users can revoke from their Privy
-      // settings at any time; we re-prompt on next deposit attempt.
-      await delegateWallet({ address: walletAddress, chainType: "solana" });
-      // Confirm server-side that the delegation actually landed in Privy's
+      // addSigners is headless — no built-in modal — but it does require an
+      // authenticated user session. The user clicks our consent button (the
+      // CTA below this handler) which counts as their explicit one-time
+      // authorization. Users can revoke via their Privy account settings or
+      // by us calling removeSigners; revocation re-triggers this flow on
+      // their next deposit.
+      await addSigners({
+        address: walletAddress,
+        signers: [{ signerId, policyIds: [policyId] }],
+      });
+      // Confirm server-side that the signer actually landed in Privy's
       // system. The server SDK call is the source of truth — we don't trust
-      // the modal closing as proof on its own.
+      // the addSigners promise resolving as proof on its own.
       const res = await authedFetch("/api/wallet/delegate-confirm", {
         method: "POST",
         body: JSON.stringify({}),
@@ -91,13 +112,13 @@ export function DepositPanel() {
         );
       }
     } catch (err) {
-      // User declined or modal failed.
+      // User declined or addSigners failed.
       const message = err instanceof Error ? err.message : "Authorization cancelled.";
       setDelegationError(message);
     } finally {
       setDelegating(false);
     }
-  }, [walletAddress, delegating, delegateWallet, authedFetch]);
+  }, [walletAddress, delegating, addSigners, authedFetch]);
 
   const handleBuyWithCard = useCallback(() => {
     if (!walletAddress) return;

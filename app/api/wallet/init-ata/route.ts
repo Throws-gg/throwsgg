@@ -13,6 +13,7 @@ import {
 import bs58 from "bs58";
 import { verifyRequest } from "@/lib/auth/verify-request";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSolanaEmbeddedAddress } from "@/lib/auth/privy";
 
 /**
  * POST /api/wallet/init-ata
@@ -68,19 +69,37 @@ export async function POST(request: NextRequest) {
     .eq("id", authed.dbUserId)
     .single();
 
-  if (!userRow?.wallet_address) {
+  let walletAddress = userRow?.wallet_address;
+
+  // Lazy backfill: TEE embedded wallets are provisioned a few seconds
+  // after Privy auth completes, which sometimes lands AFTER our /auth/sync
+  // call. If wallet_address is still null, re-fetch from Privy now and
+  // persist.
+  if (!walletAddress) {
+    const fetched = await getSolanaEmbeddedAddress(authed.privyId);
+    if (fetched) {
+      await supabase
+        .from("users")
+        .update({ wallet_address: fetched })
+        .eq("id", authed.dbUserId)
+        .is("wallet_address", null);
+      walletAddress = fetched;
+    }
+  }
+
+  if (!walletAddress) {
     return NextResponse.json(
       { error: "No wallet linked to this account" },
       { status: 400 },
     );
   }
 
-  if (userRow.ata_initialized_at) {
+  if (userRow?.ata_initialized_at) {
     return NextResponse.json({ status: "skipped" });
   }
 
   try {
-    const owner = new PublicKey(userRow.wallet_address);
+    const owner = new PublicKey(walletAddress);
     const connection = new Connection(RPC_URL, "confirmed");
 
     // ATA is a PDA — allowOwnerOffCurve=true lets us derive it for Privy

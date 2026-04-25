@@ -6,6 +6,7 @@ import { verifyRequest } from "@/lib/auth/verify-request";
 import { sendEmail } from "@/lib/email/send";
 import DepositReceived from "@/lib/email/templates/DepositReceived";
 import { sweepUserUsdc } from "@/lib/wallet/sweep";
+import { getSolanaEmbeddedAddress } from "@/lib/auth/privy";
 
 /**
  * POST /api/wallet/deposit
@@ -53,7 +54,24 @@ export async function POST(request: NextRequest) {
       .eq("id", userId)
       .single();
 
-    const walletAddress = userRow?.wallet_address;
+    let walletAddress = userRow?.wallet_address;
+
+    // Lazy backfill: TEE embedded wallets are provisioned a few seconds
+    // after Privy auth completes, which sometimes lands AFTER our /auth/sync
+    // call. If wallet_address is still null, re-fetch from Privy now and
+    // persist. Once persisted it never gets re-fetched again.
+    if (!walletAddress) {
+      const fetched = await getSolanaEmbeddedAddress(authed.privyId);
+      if (fetched) {
+        await supabase
+          .from("users")
+          .update({ wallet_address: fetched })
+          .eq("id", userId)
+          .is("wallet_address", null);
+        walletAddress = fetched;
+      }
+    }
+
     if (!walletAddress) {
       return NextResponse.json(
         { error: "No deposit wallet linked to this account" },
