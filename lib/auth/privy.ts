@@ -11,9 +11,55 @@ export function getPrivyClient(): PrivyClient {
       throw new Error("Privy credentials not configured");
     }
 
-    privyClient = new PrivyClient(appId, appSecret);
+    // PRIVY_AUTHORIZATION_KEY is the secret half of the "Sweeping Key"
+    // authorization keypair from the Privy dashboard. With it, calls to
+    // privy.walletApi.solana.signAndSendTransaction() will be signed by
+    // this key — and the policy attached to the key (sweep-usdc-prod)
+    // restricts what those signatures can authorize: USDC SPL transfers
+    // to our hot wallet ATA only, transferChecked only.
+    //
+    // Without it, walletApi calls to delegated wallets fail authorization.
+    // Optional in dev/local — if unset, the client still works for
+    // non-walletApi calls (verifyAuthToken, getUserById, etc.).
+    const authorizationPrivateKey = process.env.PRIVY_AUTHORIZATION_KEY;
+
+    privyClient = new PrivyClient(appId, appSecret, {
+      walletApi: authorizationPrivateKey
+        ? { authorizationPrivateKey }
+        : undefined,
+    });
   }
   return privyClient;
+}
+
+/**
+ * Check whether a user has delegated their embedded Solana wallet to our
+ * authorization key. Required before we can sweep their deposits.
+ */
+export async function isWalletDelegated(privyDid: string): Promise<{
+  delegated: boolean;
+  walletAddress: string | null;
+}> {
+  try {
+    const client = getPrivyClient();
+    const user = await client.getUserById(privyDid);
+    const embedded = user.linkedAccounts.find((a): a is WalletWithMetadata =>
+      a.type === "wallet" &&
+      (a as WalletWithMetadata).walletClientType === "privy" &&
+      (a as WalletWithMetadata).chainType === "solana"
+    );
+    if (!embedded) return { delegated: false, walletAddress: null };
+
+    // The `delegated` flag on the WalletWithMetadata is true once the user
+    // has consented via the delegateWallet flow.
+    const delegated =
+      (embedded as unknown as { delegated?: boolean }).delegated === true;
+
+    return { delegated, walletAddress: embedded.address };
+  } catch (err) {
+    console.error("isWalletDelegated failed:", err);
+    return { delegated: false, walletAddress: null };
+  }
 }
 
 /**

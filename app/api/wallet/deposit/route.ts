@@ -5,6 +5,7 @@ import { trackServer, identifyServer } from "@/lib/analytics/posthog-server";
 import { verifyRequest } from "@/lib/auth/verify-request";
 import { sendEmail } from "@/lib/email/send";
 import DepositReceived from "@/lib/email/templates/DepositReceived";
+import { sweepUserUsdc } from "@/lib/wallet/sweep";
 
 /**
  * POST /api/wallet/deposit
@@ -291,12 +292,60 @@ export async function POST(request: NextRequest) {
       }).catch((err) => console.error("Deposit email failed:", err));
     }
 
+    // Sweep the user's USDC into the hot wallet — only if they've delegated.
+    // Without this step, deposited USDC sits in the user's embedded wallet
+    // forever and the hot wallet bleeds funding withdrawals from its float.
+    //
+    // Best-effort: a sweep failure does NOT roll back the credit. The credit
+    // is recorded in our DB; the on-chain USDC stays at the user's address
+    // and we'll retry next deposit poll, or via admin tooling.
+    //
+    // Gated on sweep_delegated_at — set after the user clicks through the
+    // Privy delegation modal. If they haven't, we leave the funds and let
+    // the client surface a "please authorize" CTA on next deposit attempt.
+    let sweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
+    if (totalCreditedUsdc > 0) {
+      const { data: delegationRow } = await supabase
+        .from("users")
+        .select("sweep_delegated_at, sweep_revoked_at")
+        .eq("id", userId)
+        .single();
+      const delegated =
+        !!delegationRow?.sweep_delegated_at && !delegationRow?.sweep_revoked_at;
+
+      if (delegated) {
+        try {
+          sweep = await sweepUserUsdc(walletAddress);
+          if (sweep.status === "failed") {
+            // Log + carry on. Admin tooling or next deposit poll will retry.
+            // We don't block the response — user's balance is already credited.
+            trackServer(userId, "sweep_failed", {
+              wallet_address: walletAddress,
+              amount_usdc: totalCreditedUsdc,
+              error: sweep.error,
+            });
+          } else if (sweep.status === "swept") {
+            trackServer(userId, "sweep_completed", {
+              wallet_address: walletAddress,
+              amount_usdc: sweep.amount,
+              signature: sweep.signature,
+            });
+          }
+        } catch (err) {
+          console.error("Sweep threw unexpectedly:", err);
+        }
+      }
+    }
+
     return NextResponse.json({
       status: "deposited",
       credited: totalCreditedUsd,
       balances,
       newBalance,
       foreignTokens: balances.foreignTokens,
+      sweep: sweep
+        ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature }
+        : null,
     });
   } catch (error) {
     console.error("Deposit check error:", error);

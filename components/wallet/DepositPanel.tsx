@@ -2,10 +2,11 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useDelegatedActions } from "@privy-io/react-auth";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { useFundWallet } from "@privy-io/react-auth/solana";
 import { useDepositMonitor } from "@/hooks/useDepositMonitor";
+import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { track } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +14,12 @@ export function DepositPanel() {
   const { ready, authenticated } = usePrivy();
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
+  const { delegateWallet } = useDelegatedActions();
+  const authedFetch = useAuthedFetch();
   const [copied, setCopied] = useState(false);
+  const [delegated, setDelegated] = useState<boolean | null>(null);
+  const [delegating, setDelegating] = useState(false);
+  const [delegationError, setDelegationError] = useState<string | null>(null);
   // Default to "send" — our audience is crypto-native, they already have
   // wallets and would bounce on MoonPay KYC. Card-buy stays one tab away
   // for users who genuinely need an onramp.
@@ -36,6 +42,62 @@ export function DepositPanel() {
       track("deposit_initiated", { method: activeTab });
     }
   }, [walletAddress, activeTab]);
+
+  // Pull delegation state on mount. We block deposits until the user
+  // delegates so funds don't accumulate in their embedded wallet
+  // beyond our reach.
+  useEffect(() => {
+    if (!authenticated) return;
+    let cancelled = false;
+    authedFetch("/api/wallet/sweep-status")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setDelegated(!!d.delegated);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Default to undelegated on error so users see the auth CTA.
+        setDelegated(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, authedFetch]);
+
+  const handleDelegate = useCallback(async () => {
+    if (!walletAddress || delegating) return;
+    setDelegating(true);
+    setDelegationError(null);
+    try {
+      // Privy pops its delegation modal — user clicks "Approve". This is
+      // an explicit, one-time consent. Users can revoke from their Privy
+      // settings at any time; we re-prompt on next deposit attempt.
+      await delegateWallet({ address: walletAddress, chainType: "solana" });
+      // Confirm server-side that the delegation actually landed in Privy's
+      // system. The server SDK call is the source of truth — we don't trust
+      // the modal closing as proof on its own.
+      const res = await authedFetch("/api/wallet/delegate-confirm", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        setDelegated(true);
+        track("sweep_delegation_completed", { wallet_address: walletAddress });
+      } else {
+        const data = await res.json();
+        setDelegationError(
+          data.message || "Authorization didn't complete. Please try again."
+        );
+      }
+    } catch (err) {
+      // User declined or modal failed.
+      const message = err instanceof Error ? err.message : "Authorization cancelled.";
+      setDelegationError(message);
+    } finally {
+      setDelegating(false);
+    }
+  }, [walletAddress, delegating, delegateWallet, authedFetch]);
 
   const handleBuyWithCard = useCallback(() => {
     if (!walletAddress) return;
@@ -68,6 +130,65 @@ export function DepositPanel() {
       <div className="rounded-2xl border border-white/[0.06] bg-[#12121a] p-8 text-center">
         <div className="w-5 h-5 border-2 border-violet/40 border-t-violet rounded-full animate-spin mx-auto mb-3" />
         <p className="text-white/40 text-sm">Setting up your wallet...</p>
+      </div>
+    );
+  }
+
+  // Delegation gate. Users must authorize one-time before we'll surface the
+  // deposit address. Without this, USDC sits in their embedded wallet
+  // unswept and our hot wallet bleeds funding withdrawals.
+  if (delegated === false) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-violet/20 bg-gradient-to-b from-violet/[0.06] to-violet/[0.02] p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-violet/15 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="text-white font-semibold text-sm">One-time authorization</h3>
+              <p className="text-white/55 text-xs mt-1 leading-relaxed">
+                Authorize throws.gg to move deposits into your game balance. This is how funds reach your account — without it, deposits sit on-chain and never credit.
+              </p>
+            </div>
+          </div>
+
+          <ul className="text-white/45 text-[11px] leading-relaxed space-y-1.5 pl-1">
+            <li>· Limited to USDC sent to your game wallet</li>
+            <li>· Only routes funds to throws.gg — nowhere else</li>
+            <li>· You can revoke anytime in your Privy account</li>
+          </ul>
+
+          <button
+            onClick={handleDelegate}
+            disabled={delegating}
+            className={cn(
+              "w-full py-3.5 rounded-xl font-bold text-sm transition-all",
+              delegating
+                ? "bg-white/[0.04] text-white/30 cursor-not-allowed"
+                : "bg-gradient-to-r from-violet to-magenta text-white shadow-[0_4px_20px_rgba(139,92,246,0.25)] hover:opacity-90 active:scale-[0.99]"
+            )}
+          >
+            {delegating ? "Waiting for authorization…" : "Authorize & continue"}
+          </button>
+
+          {delegationError && (
+            <p className="text-red/70 text-[11px] text-center">{delegationError}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state while we figure out delegation status.
+  if (delegated === null) {
+    return (
+      <div className="rounded-2xl border border-white/[0.06] bg-[#12121a] p-8 text-center">
+        <div className="w-5 h-5 border-2 border-violet/40 border-t-violet rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-white/40 text-sm">Loading…</p>
       </div>
     );
   }
