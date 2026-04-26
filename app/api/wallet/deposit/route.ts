@@ -238,12 +238,52 @@ export async function POST(request: NextRequest) {
 
     const totalCreditedUsd = totalCreditedUsdc + solCreditedUsd;
 
+    // Even when there's nothing new to credit, we still want to sweep any
+    // residual USDC that's sitting at the user's wallet on-chain — could be
+    // funds that arrived before the user delegated, or a previous sweep that
+    // failed mid-flight. Idempotent: if balance is 0 the sweep no-ops.
     if (totalCreditedUsd < 0.01) {
+      let residualSweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
+      if (balances.usdc > 0) {
+        const { data: delegationRow } = await supabase
+          .from("users")
+          .select("sweep_delegated_at, sweep_revoked_at")
+          .eq("id", userId)
+          .single();
+        const delegated =
+          !!delegationRow?.sweep_delegated_at && !delegationRow?.sweep_revoked_at;
+        if (delegated) {
+          try {
+            residualSweep = await sweepUserUsdc(walletAddress);
+            if (residualSweep.status === "swept") {
+              trackServer(userId, "sweep_completed", {
+                wallet_address: walletAddress,
+                amount_usdc: residualSweep.amount,
+                signature: residualSweep.signature,
+                source: "residual",
+              });
+            } else if (residualSweep.status === "failed") {
+              trackServer(userId, "sweep_failed", {
+                wallet_address: walletAddress,
+                amount_usdc: balances.usdc,
+                error: residualSweep.error,
+                source: "residual",
+              });
+            }
+          } catch (err) {
+            console.error("Residual sweep threw:", err);
+          }
+        }
+      }
+
       return NextResponse.json({
         status: "no_new_deposits",
         balances,
         credited: 0,
         foreignTokens: balances.foreignTokens,
+        sweep: residualSweep
+          ? { status: residualSweep.status, amount: residualSweep.amount, signature: residualSweep.signature, error: residualSweep.error }
+          : null,
       });
     }
 
@@ -362,7 +402,7 @@ export async function POST(request: NextRequest) {
       newBalance,
       foreignTokens: balances.foreignTokens,
       sweep: sweep
-        ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature }
+        ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature, error: sweep.error }
         : null,
     });
   } catch (error) {
