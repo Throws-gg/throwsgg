@@ -19,6 +19,7 @@ export function DepositPanel() {
   const [copied, setCopied] = useState(false);
   const [delegated, setDelegated] = useState<boolean | null>(null);
   const [delegating, setDelegating] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [delegationError, setDelegationError] = useState<string | null>(null);
   // Default to "send" — our audience is crypto-native, they already have
   // wallets and would bounce on MoonPay KYC. Card-buy stays one tab away
@@ -95,20 +96,42 @@ export function DepositPanel() {
         address: walletAddress,
         signers: [{ signerId, policyIds: [policyId] }],
       });
-      // Confirm server-side that the signer actually landed in Privy's
-      // system. The server SDK call is the source of truth — we don't trust
-      // the addSigners promise resolving as proof on its own.
-      const res = await authedFetch("/api/wallet/delegate-confirm", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      if (res.ok) {
+
+      // addSigners has resolved — Privy's write side has the signer. But
+      // the read side (getUserById) takes 1-10s to propagate. Poll the
+      // confirm endpoint silently until it succeeds, so the user sees a
+      // calm "Verifying…" state instead of an alarming "didn't propagate"
+      // error message during the consistency window.
+      setDelegating(false);
+      setVerifying(true);
+
+      let confirmed = false;
+      for (let i = 0; i < 15; i++) {
+        const res = await authedFetch("/api/wallet/delegate-confirm", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          confirmed = true;
+          break;
+        }
+        // The server itself retries internally for ~3s; if it 409s we
+        // wait another second before re-asking. Total budget here is up
+        // to 15s on top of the server's internal 3s = ~18s ceiling
+        // before we surface a real error.
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (confirmed) {
         setDelegated(true);
         track("sweep_delegation_completed", { wallet_address: walletAddress });
       } else {
-        const data = await res.json();
+        // Genuinely couldn't confirm after a generous window — something
+        // is actually wrong. Note that even if we land here, the next
+        // /sweep-status poll on page load will reconcile and unblock
+        // the user — so this path is rare-but-recoverable.
         setDelegationError(
-          data.message || "Authorization didn't complete. Please try again."
+          "We couldn't verify the authorization. Refresh the page and try again."
         );
       }
     } catch (err) {
@@ -117,6 +140,7 @@ export function DepositPanel() {
       setDelegationError(message);
     } finally {
       setDelegating(false);
+      setVerifying(false);
     }
   }, [walletAddress, delegating, addSigners, authedFetch]);
 
@@ -185,18 +209,31 @@ export function DepositPanel() {
 
           <button
             onClick={handleDelegate}
-            disabled={delegating}
+            disabled={delegating || verifying}
             className={cn(
-              "w-full py-3.5 rounded-xl font-bold text-sm transition-all",
-              delegating
+              "w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2",
+              delegating || verifying
                 ? "bg-white/[0.04] text-white/30 cursor-not-allowed"
                 : "bg-gradient-to-r from-violet to-magenta text-white shadow-[0_4px_20px_rgba(139,92,246,0.25)] hover:opacity-90 active:scale-[0.99]"
             )}
           >
-            {delegating ? "Waiting for authorization…" : "Authorize & continue"}
+            {(delegating || verifying) && (
+              <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+            )}
+            {delegating
+              ? "Waiting for authorization…"
+              : verifying
+                ? "Verifying authorization…"
+                : "Authorize & continue"}
           </button>
 
-          {delegationError && (
+          {verifying && (
+            <p className="text-white/35 text-[11px] text-center">
+              This usually takes a few seconds.
+            </p>
+          )}
+
+          {delegationError && !verifying && (
             <p className="text-red/70 text-[11px] text-center">{delegationError}</p>
           )}
         </div>
