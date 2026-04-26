@@ -93,72 +93,100 @@ export async function sweepUserUsdc(
       HOT_WALLET_PUBKEY,
       false
     );
-
-    // Build a fee-payer transaction:
-    //   - feePayer = hot wallet (so user's embedded wallet doesn't need SOL)
-    //   - signers  = hot wallet (for fee) + user's embedded wallet (for transfer authority)
-    // Privy will sign for the user's wallet; we sign for the fee payer locally.
+    const hotAtaInfo = await conn.getAccountInfo(hotAta);
     const hotWallet = Keypair.fromSecretKey(bs58.decode(hotKey));
 
-    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+    // Retry loop: Solana blockhashes expire after ~60-90s, and the round-trip
+    // through Privy's signing service can stretch close to that. If we get
+    // "Blockhash not found" or "block height exceeded", rebuild the tx with
+    // a fresh blockhash and try again. Up to 3 attempts.
+    const privy = getPrivyClient();
+    const uiAmount = Number(rawAmount) / 10 ** USDC_DECIMALS;
+    let lastError: string | undefined;
 
-    const tx = new Transaction({
-      feePayer: hotWallet.publicKey,
-      blockhash,
-      lastValidBlockHeight,
-    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        // Fetch a fresh blockhash on every attempt. "finalized" is more
+        // conservative than "confirmed" — the hash is older but won't
+        // disappear on a chain reorg, which trades a few seconds of
+        // freshness for stability over Privy's signing latency.
+        const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("finalized");
 
-    // Defensive: if the hot ATA somehow doesn't exist (extremely unlikely since
-    // we hold $3K+ there), create it. The fee payer (hot wallet) covers rent.
-    const hotAtaInfo = await conn.getAccountInfo(hotAta);
-    if (!hotAtaInfo) {
-      tx.add(
-        createAssociatedTokenAccountInstruction(
-          hotWallet.publicKey,
-          hotAta,
-          HOT_WALLET_PUBKEY,
-          USDC_MINT
-        )
-      );
+        const tx = new Transaction({
+          feePayer: hotWallet.publicKey,
+          blockhash,
+          lastValidBlockHeight,
+        });
+
+        // Defensive: if the hot ATA somehow doesn't exist (extremely unlikely
+        // since we hold $3K+ there), create it. The fee payer (hot wallet)
+        // covers rent.
+        if (!hotAtaInfo) {
+          tx.add(
+            createAssociatedTokenAccountInstruction(
+              hotWallet.publicKey,
+              hotAta,
+              HOT_WALLET_PUBKEY,
+              USDC_MINT
+            )
+          );
+        }
+
+        // The actual sweep — TransferChecked is the policy-allowed instruction.
+        // Authority = the user's embedded wallet (Privy will sign for it).
+        tx.add(
+          createTransferCheckedInstruction(
+            userAta, // source — user's USDC ATA
+            USDC_MINT,
+            hotAta, // destination — hot wallet's USDC ATA
+            userPubkey, // authority — user's embedded wallet
+            rawAmount, // raw amount in base units (6 decimals for USDC)
+            USDC_DECIMALS
+          )
+        );
+
+        // Hot wallet signs the fee. Privy will sign as `userPubkey` via the
+        // walletApi call below — Privy's signature is added to the tx by the
+        // API, not by us. We pre-sign as the fee payer so the tx is
+        // partial-signed when handed to Privy.
+        tx.partialSign(hotWallet);
+
+        // Hand the partial-signed tx to Privy. Privy adds the user's
+        // signature (gated by the policy) and broadcasts. The policy
+        // ensures Privy will ONLY sign if the destination is the hot ATA,
+        // mint is USDC, and instruction is transferChecked. Anything else
+        // → policy denial → throws.
+        const result = await privy.walletApi.solana.signAndSendTransaction({
+          address: userWalletAddress,
+          chainType: "solana",
+          caip2: SOLANA_MAINNET_CAIP2,
+          transaction: tx,
+        });
+
+        return {
+          status: "swept",
+          amount: uiAmount,
+          signature: result.hash,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = message;
+        // Retry only on blockhash-related races; everything else is a real
+        // failure (policy denial, insufficient funds, etc).
+        const isBlockhashRace =
+          message.includes("Blockhash not found") ||
+          message.includes("block height exceeded") ||
+          message.includes("BlockhashNotFound");
+        if (!isBlockhashRace || attempt === 2) {
+          throw err;
+        }
+        // Brief backoff so we don't hammer the RPC + Privy with the same
+        // expired-blockhash window.
+        await new Promise((r) => setTimeout(r, 750));
+      }
     }
 
-    // The actual sweep — TransferChecked is the policy-allowed instruction.
-    // Authority = the user's embedded wallet (Privy will sign for it).
-    tx.add(
-      createTransferCheckedInstruction(
-        userAta, // source — user's USDC ATA
-        USDC_MINT,
-        hotAta, // destination — hot wallet's USDC ATA
-        userPubkey, // authority — user's embedded wallet
-        rawAmount, // raw amount in base units (6 decimals for USDC)
-        USDC_DECIMALS
-      )
-    );
-
-    // Hot wallet signs the fee. Privy will sign as `userPubkey` via the
-    // walletApi call below — Privy's signature is added to the tx by the API,
-    // not by us. We pre-sign as the fee payer so the tx is partial-signed
-    // when handed to Privy.
-    tx.partialSign(hotWallet);
-
-    // Hand the partial-signed tx to Privy. Privy adds the user's signature
-    // (gated by the policy) and broadcasts. The policy ensures Privy will
-    // ONLY sign if the destination is the hot ATA, mint is USDC, and
-    // instruction is transferChecked. Anything else → policy denial → throws.
-    const privy = getPrivyClient();
-    const result = await privy.walletApi.solana.signAndSendTransaction({
-      address: userWalletAddress,
-      chainType: "solana",
-      caip2: SOLANA_MAINNET_CAIP2,
-      transaction: tx,
-    });
-
-    const uiAmount = Number(rawAmount) / 10 ** USDC_DECIMALS;
-    return {
-      status: "swept",
-      amount: uiAmount,
-      signature: result.hash,
-    };
+    return { status: "failed", error: lastError ?? "exhausted retries" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("sweepUserUsdc failed:", { userWalletAddress, error: message });
