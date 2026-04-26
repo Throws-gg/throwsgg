@@ -241,10 +241,16 @@ export async function POST(request: NextRequest) {
     // Even when there's nothing new to credit, we still want to sweep any
     // residual USDC that's sitting at the user's wallet on-chain — could be
     // funds that arrived before the user delegated, or a previous sweep that
-    // failed mid-flight. Idempotent: if balance is 0 the sweep no-ops.
+    // failed mid-flight. Idempotent: sweepUserUsdc reads the live on-chain
+    // balance itself and no-ops at zero, so this is safe to fire unconditionally.
+    //
+    // Note: we deliberately do NOT gate on balances.usdc > 0 here. That value
+    // comes from getUsdcBalance() which silently returns 0 on any RPC blip.
+    // The sweep helper does its own balance read (cheap), and that read is the
+    // authoritative one — if it sees nothing to send, status="skipped_zero".
     if (totalCreditedUsd < 0.01) {
       let residualSweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
-      if (balances.usdc > 0) {
+      {
         const { data: delegationRow } = await supabase
           .from("users")
           .select("sweep_delegated_at, sweep_revoked_at")
