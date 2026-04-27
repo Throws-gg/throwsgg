@@ -44,3 +44,11 @@ next-env.d.ts
 .agents/
 marketing/
 video/
+
+# operations / hiring / outsourcing — never commit these
+hiring/
+va/
+ops/
+internal-docs/
+private/
+contracts/
