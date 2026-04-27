@@ -120,8 +120,12 @@ export async function GET(
         races > 0
           ? Math.round(((wins + places + shows) / races) * 1000) / 10
           : 0,
+      // DB stores { raceNumber, position }[]; we project to position numbers
+      // for the finish-pill rendering on the form-guide pages.
       last5Results: Array.isArray(horse.last_5_results)
-        ? horse.last_5_results
+        ? (horse.last_5_results as ({ position: number } | number)[]).map((r) =>
+            typeof r === "number" ? r : r.position,
+          )
         : [],
       speedRating: horse.speed_rating ?? 70,
       avgFinish: parseFloat(String(horse.avg_finish ?? 4.5)),

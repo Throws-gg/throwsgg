@@ -40,7 +40,10 @@ export async function GET() {
     career_wins: number | null;
     career_places: number | null;
     career_shows: number | null;
-    last_5_results: number[] | null;
+    // DB stores last_5_results as { raceNumber, position }[] (jsonb).
+    // We project it down to plain position numbers for the form-guide
+    // pills, which only care about the finish slot.
+    last_5_results: ({ raceNumber: number; position: number } | number)[] | null;
     speed_rating: number | null;
     avg_finish: string | number | null;
     days_since_last_race: number | null;
@@ -70,7 +73,13 @@ export async function GET() {
         races > 0
           ? Math.round(((wins + places + shows) / races) * 1000) / 10
           : 0,
-      last5Results: Array.isArray(h.last_5_results) ? h.last_5_results : [],
+      // Always emit as number[] so the page can render finish-position
+      // pills directly without type-narrowing each element.
+      last5Results: Array.isArray(h.last_5_results)
+        ? h.last_5_results.map((r) =>
+            typeof r === "number" ? r : r.position,
+          )
+        : [],
       speedRating: h.speed_rating ?? 70,
       avgFinish: parseFloat(String(h.avg_finish ?? 4.5)),
       daysSinceLastRace: h.days_since_last_race ?? 0,
