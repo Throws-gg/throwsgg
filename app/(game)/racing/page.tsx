@@ -89,7 +89,12 @@ export default function RacingPage() {
   const lastRaceIdRef = useRef("");
   const lastStatusRef = useRef("");
 
-  const { userId, balance, username } = useUserStore();
+  // Subscribe to bonusBalance + wageringRemaining reactively so the bet
+  // modal sees fresh values. Earlier this was reading via getState() at
+  // mount time which returned a stale snapshot — users with cash + bonus
+  // saw "Insufficient balance" because totalFunds was computed against
+  // an outdated bonus value (often 0 right after login).
+  const { userId, balance, username, bonusBalance, wageringRemaining } = useUserStore();
   const { login } = useAuthActions();
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
   // Sound hooks removed — no audio assets for racing yet
@@ -766,8 +771,8 @@ export default function RacingPage() {
             raceId={currentRace.id}
             userId={userId}
             balance={balance}
-            bonusBalance={useUserStore.getState().bonusBalance}
-            wageringRemaining={useUserStore.getState().wageringRemaining}
+            bonusBalance={bonusBalance}
+            wageringRemaining={wageringRemaining}
             raceDistance={currentRace.distance}
             raceGround={currentRace.ground}
             authedFetch={authedFetch}
@@ -857,11 +862,30 @@ function HorseBetCard({
 
   const handlePlaceBet = async () => {
     if (!userId || betAmount < 0.1) return;
+
+    // Auto-cap to whatever the user can actually afford (cash + bonus combined)
+    // and to the per-horse liability cap if known. Frictionless: clicking
+    // "Bet $5" with $1 cash + $0 bonus quietly places a $1 bet rather than
+    // erroring out and asking the user to fix it.
+    const totalFunds = balance + bonusBalance;
+    const cap = Math.min(
+      betAmount,
+      totalFunds,
+      BANKROLL_RACING.MAX_BET,
+      ...(maxLiabilityBet !== null ? [maxLiabilityBet] : []),
+    );
+    const stake = Math.floor(cap * 100) / 100; // round DOWN to cents — never bet a fraction we can't cover
+    if (stake < 0.1) {
+      // Truly nothing to bet with — surface this as a guard rather than silently failing.
+      setResult({ success: false, message: "Add funds to place a bet" });
+      return;
+    }
+
     setPlacing(true);
     try {
       const res = await authedFetch("/api/race/bet", {
         method: "POST",
-        body: JSON.stringify({ userId, raceId, horseId: entry.horseId, amount: betAmount, betType }),
+        body: JSON.stringify({ userId, raceId, horseId: entry.horseId, amount: stake, betType }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1141,18 +1165,37 @@ function HorseBetCard({
               )}
             </div>
 
-            {betAmount > 0 && (
-              <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 flex justify-between items-center">
-                <div>
-                  <p className="text-white/40 text-[10px]">Stake</p>
-                  <p className="text-white font-bold font-mono">${betAmount.toFixed(2)}</p>
+            {betAmount > 0 && (() => {
+              // Mirror the server's "spend cash first, then bonus" allocation
+              // so the user sees up-front exactly how the stake will be split.
+              // Avoids the "where did my bonus go?" surprise post-bet.
+              const fromCash = Math.min(balance, betAmount);
+              const fromBonus = Math.max(0, betAmount - balance);
+              const showSplit = fromBonus > 0;
+              return (
+                <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-white/40 text-[10px]">Stake</p>
+                      <p className="text-white font-bold font-mono">${betAmount.toFixed(2)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-white/40 text-[10px]">Potential Win</p>
+                      <p className="text-green font-bold font-mono">${potentialPayout.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  {showSplit && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-white/45 pt-1.5 border-t border-white/[0.04]">
+                      <span className="font-mono tabular-nums">${fromCash.toFixed(2)}</span>
+                      <span className="text-white/25">cash</span>
+                      <span className="text-white/20">+</span>
+                      <span className="font-mono tabular-nums text-violet/70">${fromBonus.toFixed(2)}</span>
+                      <span className="text-white/25">bonus</span>
+                    </div>
+                  )}
                 </div>
-                <div className="text-right">
-                  <p className="text-white/40 text-[10px]">Potential Win</p>
-                  <p className="text-green font-bold font-mono">${potentialPayout.toFixed(2)}</p>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             <button onClick={handlePlaceBet} disabled={betAmount < 0.1 || placing}
               className={cn("w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-[0.99]",

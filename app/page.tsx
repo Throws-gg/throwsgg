@@ -704,6 +704,7 @@ export default function LandingPage() {
               { href: "/verify", label: "provably fair" },
               { href: "/affiliates", label: "affiliates" },
               { href: "/terms", label: "terms" },
+              { href: "/privacy", label: "privacy" },
               { href: "/responsible-gambling", label: "responsible gambling" },
               { href: "https://x.com/throwsgg", label: "X / twitter", external: true },
             ].map((link) => (
