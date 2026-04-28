@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useUserStore } from "@/stores/userStore";
@@ -210,14 +210,44 @@ function VipProgress({ totalWagered }: { totalWagered: number }) {
 // ======= MAIN PAGE =======
 
 export default function ProfilePage() {
-  const { username, totalWagered, totalProfit, balance, referralCode } = useUserStore();
+  const { username, totalWagered, totalProfit, balance, referralCode, userId } = useUserStore();
+  const authedFetch = useAuthedFetch();
   const [editingUsername, setEditingUsername] = useState(false);
+  const [streak, setStreak] = useState<{
+    current: number;
+    longest: number;
+    bettedToday: boolean;
+    atRisk: boolean;
+  } | null>(null);
 
   // Stats that need API data show "—" until we wire them up.
   // Better to show honest zeros than fake numbers that destroy trust.
   const hasBetHistory = totalWagered > 0;
 
   const currentTier = getVipTier(totalWagered);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authedFetch("/api/streak/status");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          current: number;
+          longest: number;
+          bettedToday: boolean;
+          atRisk: boolean;
+        };
+        if (!cancelled) setStreak(data);
+      } catch {
+        // silent — non-critical
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authedFetch, userId]);
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] pb-20 md:pb-8">
@@ -337,8 +367,25 @@ export default function ProfilePage() {
           />
           <StatCard
             label="Streak"
-            value={hasBetHistory ? "—" : "—"}
-            subValue={hasBetHistory ? "coming soon" : "start a streak"}
+            value={
+              streak && streak.current > 0
+                ? `${streak.current}🔥`
+                : hasBetHistory
+                  ? "0"
+                  : "—"
+            }
+            subValue={
+              streak && streak.current > 0
+                ? streak.bettedToday
+                  ? `best ${streak.longest}`
+                  : streak.atRisk
+                    ? "bet today to keep it"
+                    : `best ${streak.longest}`
+                : hasBetHistory
+                  ? "place a bet today"
+                  : "start a streak"
+            }
+            color={streak?.atRisk ? "text-gold" : undefined}
             delay={0.55}
           />
         </div>

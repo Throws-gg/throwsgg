@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -55,11 +56,13 @@ interface VerifyResult {
 // ======= MAIN PAGE =======
 
 export default function VerifyPage() {
+  const searchParams = useSearchParams();
   const [raceInput, setRaceInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [raceData, setRaceData] = useState<VerifyRaceData | null>(null);
   const [result, setResult] = useState<VerifyResult | null>(null);
+  const autoVerifiedRef = useRef(false);
 
   const handleVerify = useCallback(async () => {
     setError(null);
@@ -136,6 +139,24 @@ export default function VerifyPage() {
       setError("Verification failed. Please try again.");
     }
     setLoading(false);
+  }, [raceInput]);
+
+  // Deep-link support: /verify?race=1234 prefills the input and auto-runs once.
+  useEffect(() => {
+    if (autoVerifiedRef.current) return;
+    const fromQuery = searchParams.get("race");
+    if (!fromQuery) return;
+    autoVerifiedRef.current = true;
+    setRaceInput(fromQuery);
+  }, [searchParams]);
+
+  // Once raceInput is set from the query param, fire the verify automatically.
+  useEffect(() => {
+    if (!autoVerifiedRef.current) return;
+    if (!raceInput || loading || raceData || result) return;
+    handleVerify();
+    // intentionally only fires when raceInput first arrives from the query
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raceInput]);
 
   return (

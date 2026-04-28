@@ -15,11 +15,13 @@ import { PodiumResults } from "@/components/racing/PodiumResults";
 import { BigWinCelebration } from "@/components/game/BigWinCelebration";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatTicker } from "@/components/chat/ChatTicker";
+import { LiveWinsTicker } from "@/components/racing/LiveWinsTicker";
 import { useChat } from "@/hooks/useChat";
 import { WageringProgress } from "@/components/bonus/WageringProgress";
 import { DailyBonusCard } from "@/components/bonus/DailyBonusCard";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { track } from "@/lib/analytics/posthog";
+import { getRakebackTier, EDGE_RATE } from "@/lib/rakeback/tiers";
 
 // ======= TIMESTAMP-BASED COUNTDOWN (no jitter) =======
 
@@ -77,13 +79,14 @@ export default function RacingPage() {
   const [activeBets, setActiveBets] = useState<{
     id: string; horseId: number; horseName: string; amount: number;
     lockedOdds: number; potentialPayout: number; status: string; payout?: number;
-    betType?: string;
+    betType?: string; fromBonus?: number;
   }[]>([]);
   const [shareWinBet, setShareWinBet] = useState<{
     horse: Horse; betAmount: number; lockedOdds: number; payout: number;
     gatePosition: number;
   } | null>(null);
   const [bigWin, setBigWin] = useState<{ amount: number; username?: string } | null>(null);
+  const [rakebackToast, setRakebackToast] = useState<{ amount: number; tierLabel: string } | null>(null);
   const settledRef = useRef(false);
 
   const lastRaceIdRef = useRef("");
@@ -94,7 +97,7 @@ export default function RacingPage() {
   // mount time which returned a stale snapshot — users with cash + bonus
   // saw "Insufficient balance" because totalFunds was computed against
   // an outdated bonus value (often 0 right after login).
-  const { userId, balance, username, bonusBalance, wageringRemaining } = useUserStore();
+  const { userId, balance, username, bonusBalance, wageringRemaining, totalWagered } = useUserStore();
   const { login } = useAuthActions();
   const { messages: chatMessages, unreadCount, sendMessage } = useChat();
   // Sound hooks removed — no audio assets for racing yet
@@ -135,6 +138,7 @@ export default function RacingPage() {
           // Clear settlement flag on new race
           if (raceChanged) {
             settledRef.current = false;
+            setRakebackToast(null);
           }
 
           // Check bet outcomes when race settles
@@ -159,6 +163,24 @@ export default function RacingPage() {
             });
 
             setActiveBets(updatedBets);
+
+            // Compute instant-rakeback amount for the toast.
+            // Mirrors the SQL accrue_rakeback() formula: cash stake × edge × tier %.
+            // Bonus-funded portion of stake earns no rakeback.
+            const cashStakeTotal = currentBets.reduce(
+              (s, b) => s + Math.max(0, b.amount - (b.fromBonus ?? 0)),
+              0
+            );
+            if (cashStakeTotal > 0) {
+              const tier = getRakebackTier(totalWagered);
+              const rakebackAmount = cashStakeTotal * EDGE_RATE * tier.tierPct;
+              if (rakebackAmount >= 0.01) {
+                setRakebackToast({
+                  amount: rakebackAmount,
+                  tierLabel: tier.label,
+                });
+              }
+            }
 
             // Find the top winning bet
             const wonBets = updatedBets.filter(b => b.status === "won");
@@ -374,6 +396,8 @@ export default function RacingPage() {
   });
 
   return (
+    <div className="flex flex-col h-full overflow-hidden">
+    <LiveWinsTicker />
     <div className="flex h-full overflow-hidden">
     <div className="flex-1 max-w-2xl xl:max-w-[1400px] mx-auto px-4 xl:px-6 py-3 xl:py-4 space-y-3 xl:space-y-4 overflow-x-hidden w-full">
       {/* Header */}
@@ -639,6 +663,30 @@ export default function RacingPage() {
         )}
       </div>
 
+      {/* Instant rakeback toast — shows briefly when a race settles. */}
+      <AnimatePresence>
+        {rakebackToast && phase === "results" && (
+          <motion.div
+            key={`rakeback-${rakebackToast.amount}`}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            onAnimationComplete={() => {
+              setTimeout(() => setRakebackToast(null), 4500);
+            }}
+            className="rounded-lg border border-cyan/20 bg-cyan/[0.05] px-3 py-1.5 flex items-center justify-between text-[11px]"
+          >
+            <span className="font-mono text-cyan/80">
+              +${rakebackToast.amount.toFixed(2)} rakeback
+            </span>
+            <span className="text-white/35 font-mono uppercase tracking-widest text-[9px]">
+              {rakebackToast.tierLabel} · auto-credited
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Active bets + settlement results */}
       {activeBets.length > 0 && (
         <div className="space-y-1.5">
@@ -704,12 +752,41 @@ export default function RacingPage() {
                     </button>
                   </div>
                 )}
-                {bet.status === "lost" && (
-                  <div className="text-right">
-                    <span className="text-sm font-bold text-red/60 font-mono">-${bet.amount.toFixed(2)}</span>
-                    <p className="text-[9px] text-white/25 mt-0.5">next race soon</p>
-                  </div>
-                )}
+                {bet.status === "lost" && (() => {
+                  // Photo-finish near-miss framing — show "X lengths from $Y"
+                  // when the user's horse finished within 2 lengths of the
+                  // payout-cutoff position for their bet type.
+                  // win → 1st, place → ≤2, show → ≤3.
+                  const horseEntry = currentRace.entries.find((e) => e.horseId === bet.horseId);
+                  const finishPos = horseEntry?.finishPosition ?? 99;
+                  const userMargin = horseEntry?.margin ?? null;
+                  const cutoffPos =
+                    bet.betType === "show" ? 3 : bet.betType === "place" ? 2 : 1;
+                  const cutoffEntry = currentRace.entries.find((e) => e.finishPosition === cutoffPos);
+                  const cutoffMargin = cutoffEntry?.margin ?? null;
+                  const lengthsBehind =
+                    userMargin != null && cutoffMargin != null
+                      ? Math.max(0, userMargin - cutoffMargin)
+                      : null;
+                  const showNearMiss =
+                    finishPos > cutoffPos &&
+                    lengthsBehind != null &&
+                    lengthsBehind <= 2.0 &&
+                    lengthsBehind > 0;
+                  const wouldHavePaid = bet.amount * bet.lockedOdds;
+                  return (
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-red/60 font-mono">-${bet.amount.toFixed(2)}</span>
+                      {showNearMiss ? (
+                        <p className="text-[9px] text-gold/65 mt-0.5 font-mono tabular-nums">
+                          {lengthsBehind!.toFixed(1)}L from ${wouldHavePaid.toFixed(2)}
+                        </p>
+                      ) : (
+                        <p className="text-[9px] text-white/25 mt-0.5">next race soon</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -727,6 +804,25 @@ export default function RacingPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Verify-this-race entry point. Surfaces the provably-fair flow inline
+          on the results screen so trust is felt, not buried in a sub-page. */}
+      {isResults && (
+        <a
+          href={`/verify?race=${currentRace.raceNumber}`}
+          className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-2.5 flex items-center justify-between hover:border-cyan/25 hover:bg-cyan/[0.03] transition-colors group"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+            <span className="text-[11px] text-white/55 group-hover:text-white/80 transition-colors">
+              Verify this race yourself
+            </span>
+          </div>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-white/30 group-hover:text-cyan/70 transition-colors">
+            provably fair →
+          </span>
+        </a>
       )}
 
       {/* Next race nudge — Zeigarnik open loop */}
@@ -825,6 +921,7 @@ export default function RacingPage() {
       />
     </aside>
     </div>
+    </div>
   );
 }
 
@@ -838,7 +935,7 @@ function HorseBetCard({
   raceDistance: number; raceGround: string;
   authedFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onClose: () => void;
-  onBetPlaced: (bet: { id: string; horseId: number; horseName: string; amount: number; lockedOdds: number; potentialPayout: number; status: string; betType: string }) => void;
+  onBetPlaced: (bet: { id: string; horseId: number; horseName: string; amount: number; lockedOdds: number; potentialPayout: number; status: string; betType: string; fromBonus?: number }) => void;
 }) {
   const { login: connectWallet } = useAuthActions();
   const [betAmount, setBetAmount] = useState(0);
@@ -917,6 +1014,7 @@ function HorseBetCard({
           potentialPayout: data.bet.potentialPayout,
           status: "pending",
           betType: data.bet.betType || betType,
+          fromBonus: data.fromBonus || 0,
         });
         sessionBetCount++;
         const store = useUserStore.getState();

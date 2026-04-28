@@ -15,6 +15,14 @@
     {
       "path": "/api/cron/rakeback-nudge",
       "schedule": "0 16 * * 0"
+    },
+    {
+      "path": "/api/cron/weekly-leaderboard",
+      "schedule": "30 0 * * 1"
+    },
+    {
+      "path": "/api/cron/streak-at-risk",
+      "schedule": "0 20 * * *"
     }
   ]
 }
