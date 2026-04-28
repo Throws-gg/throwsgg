@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import Image from "next/image";
-// LiveWinsTicker removed — was hardcoded fake data. Replace with real feed post-launch.
+import { LiveWinsTicker } from "@/components/racing/LiveWinsTicker";
 import { track } from "@/lib/analytics/posthog";
 
 // ======= ANIMATED COUNTER =======
@@ -214,6 +214,9 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-hidden">
+      {/* Live wins ticker — only visible once real wins exist + we're live. */}
+      {IS_LIVE && <LiveWinsTicker />}
+
       {/* ===== HERO SECTION ===== */}
       <section className="relative min-h-[100vh] flex flex-col items-center justify-center px-4 py-12 sm:py-20">
         {/* Ambient glow */}
@@ -284,10 +287,10 @@ export default function LandingPage() {
                 <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[0.95]">
                   <span className="text-white">They race.</span>
                   <br />
-                  <span className="text-white">You bet.</span>
+                  <span className="text-white">You pick.</span>
                   <br />
                   <span className="bg-gradient-to-r from-violet via-magenta to-cyan bg-clip-text text-transparent">
-                    You profit.
+                    Chaos pays.
                   </span>
                 </h1>
               </motion.div>
@@ -558,7 +561,7 @@ export default function LandingPage() {
             {[
               {
                 title: "provably fair",
-                desc: "hmac-sha256 seed reveal on every race. verify any result, anytime. we literally can't cheat.",
+                desc: "hmac-sha256 seed reveal on every race. every race can be verified. no trust-me-bro layer.",
                 icon: "shield",
               },
               {
@@ -568,7 +571,7 @@ export default function LandingPage() {
               },
               {
                 title: "crypto-native",
-                desc: "usdc, sol, eth. deposit in seconds. withdraw in seconds. no bank, no wait, no permission slip.",
+                desc: "usdc and sol on solana. fast solana withdrawals, with larger withdrawals reviewed. no bank, no wait, no permission slip.",
                 icon: "zap",
               },
               {
