@@ -16,10 +16,61 @@ function formatTime(dateStr: string): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// Weekly top-3 ROI tipsters get a flame badge next to their handle in chat.
+// Fetched once on mount + refreshed every 60s. Cheap (cached at edge) and
+// low-stakes — if it fails the chat renders without flames.
+const TOP_TIPSTERS_REFRESH_MS = 60_000;
+
 export function ChatFeed({ messages, onSend, userId, className }: ChatFeedProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
+  const [topTipsters, setTopTipsters] = useState<Map<string, number>>(new Map());
+  const [streaks, setStreaks] = useState<Map<string, number>>(new Map());
+
+  // Pull weekly top-3 usernames + active streaks for chat-handle badges.
+  // Two parallel polls; both fail-quiet.
+  useEffect(() => {
+    let cancelled = false;
+    const loadTipsters = async () => {
+      try {
+        const res = await fetch("/api/leaderboard?window=week&limit=3");
+        if (!res.ok) return;
+        const data = (await res.json()) as { entries?: { username: string }[] };
+        if (cancelled) return;
+        const m = new Map<string, number>();
+        (data.entries ?? []).forEach((e, i) => m.set(e.username, i + 1));
+        setTopTipsters(m);
+      } catch {
+        // silent
+      }
+    };
+    const loadStreaks = async () => {
+      try {
+        const res = await fetch("/api/streak/top?limit=50");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          streaks?: { username: string; current: number }[];
+        };
+        if (cancelled) return;
+        const m = new Map<string, number>();
+        (data.streaks ?? []).forEach((s) => m.set(s.username, s.current));
+        setStreaks(m);
+      } catch {
+        // silent
+      }
+    };
+    loadTipsters();
+    loadStreaks();
+    const t = setInterval(() => {
+      loadTipsters();
+      loadStreaks();
+    }, TOP_TIPSTERS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -71,9 +122,31 @@ export function ChatFeed({ messages, onSend, userId, className }: ChatFeedProps)
               </div>
             ) : (
               <div className="text-[12px] leading-relaxed">
-                <span className="font-bold text-violet/90 mr-1">
-                  {msg.username}
-                </span>
+                {(() => {
+                  const rank = topTipsters.get(msg.username);
+                  const flame = rank === 1 ? "🔥" : rank === 2 ? "⚡" : rank === 3 ? "✨" : null;
+                  const streak = streaks.get(msg.username) ?? 0;
+                  return (
+                    <span className="font-bold text-violet/90 mr-1">
+                      {flame ? (
+                        <span
+                          className="mr-0.5 text-[11px]"
+                          title={`Weekly top tipster · #${rank}`}
+                        >
+                          {flame}
+                        </span>
+                      ) : streak >= 3 ? (
+                        <span
+                          className="mr-0.5 text-[10px] text-orange-400/85 font-mono"
+                          title={`${streak}-day bet streak`}
+                        >
+                          🔥{streak}
+                        </span>
+                      ) : null}
+                      {msg.username}
+                    </span>
+                  );
+                })()}
                 <span className="text-foreground/80">{msg.message}</span>
                 <span className="text-muted-foreground/40 text-[9px] ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   {formatTime(msg.createdAt)}
