@@ -6,23 +6,24 @@ import RakebackReady from "@/lib/email/templates/RakebackReady";
 import { getRakebackTier } from "@/lib/rakeback/tiers";
 
 /**
- * Weekly rakeback nudge cron.
+ * Weekly rakeback recap cron.
  *
- * Schedule: Sunday 16:00 UTC (vercel.json). Finds users sitting on unclaimed
- * rakeback who haven't been nudged in the past 7 days, and sends one email
- * via the `retention` category (respects user preferences + global opt-out).
+ * Schedule: Sunday 16:00 UTC (vercel.json). After migration 033, rakeback
+ * is auto-credited per bet — there's nothing to "claim". This cron now
+ * sends a recap email summarising the past week's earned rakeback and
+ * highlighting tier progress, so users feel the cumulative reward.
  *
- * Safe to run more often — the `last_rakeback_nudge_at` check is idempotent
- * against a 7-day window. If the schedule fires twice in a week only the
- * first one sends.
+ * Idempotent within an ISO-week via email_log dedup. last_rakeback_nudge_at
+ * is still stamped to make the candidate query cheap.
  *
- * No body input. Returns { nudged, skipped, candidates } for observability.
+ * Returns { recapped, skipped, candidates } for observability.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const NUDGE_COOLDOWN_DAYS = 7;
+const COOLDOWN_DAYS = 6;          // 6 not 7 so a Sunday-noon firing stamps before next Sunday
 const BATCH_LIMIT = 500;
+const MIN_RECAP_AMOUNT = 0.05;    // skip nudges for trivial accruals
 
 export async function GET(request: NextRequest) {
   if (!verifyCron(request)) {
@@ -31,24 +32,26 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
   const cutoff = new Date(
-    Date.now() - NUDGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000
+    Date.now() - COOLDOWN_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const weekAgo = new Date(
+    Date.now() - 7 * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  // Pull candidates. We accept either last_rakeback_nudge_at IS NULL or
-  // older than cutoff. Same for last_rakeback_claim_at — a user who claimed
-  // yesterday doesn't need a "you have rakeback" nudge even if they earned
-  // more after the claim.
+  // Candidate set: users with email + opted-in + not banned + not nudged in 6d.
+  // We don't pre-filter on rakeback_lifetime > 0 because we need the LAST WEEK
+  // earned amount, not lifetime — that comes from rakeback_accruals. We do
+  // gate on total_wagered > 0 to skip dormant accounts.
   const { data: candidates, error } = await supabase
     .from("users")
     .select(
-      "id, username, email, email_unsubscribed_at, rakeback_claimable, total_wagered, last_rakeback_nudge_at, last_rakeback_claim_at, is_banned"
+      "id, username, email, email_unsubscribed_at, total_wagered, last_rakeback_nudge_at, is_banned"
     )
-    .gt("rakeback_claimable", 0)
     .not("email", "is", null)
     .is("email_unsubscribed_at", null)
     .eq("is_banned", false)
+    .gt("total_wagered", 0)
     .or(`last_rakeback_nudge_at.is.null,last_rakeback_nudge_at.lt.${cutoff}`)
-    .or(`last_rakeback_claim_at.is.null,last_rakeback_claim_at.lt.${cutoff}`)
     .limit(BATCH_LIMIT);
 
   if (error) {
@@ -58,43 +61,54 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  let nudged = 0;
+  let recapped = 0;
   let skipped = 0;
   const now = new Date().toISOString();
 
   for (const u of candidates ?? []) {
-    const amount = Number(u.rakeback_claimable ?? 0);
-    if (amount <= 0 || !u.email) {
+    if (!u.email) {
+      skipped++;
+      continue;
+    }
+
+    // Sum last-7d accruals for this user.
+    const { data: accruals } = await supabase
+      .from("rakeback_accruals")
+      .select("amount")
+      .eq("user_id", u.id)
+      .gte("accrued_at", weekAgo);
+
+    const weekEarned = (accruals ?? []).reduce(
+      (sum, r) => sum + Number(r.amount ?? 0),
+      0
+    );
+
+    if (weekEarned < MIN_RECAP_AMOUNT) {
       skipped++;
       continue;
     }
 
     const tier = getRakebackTier(Number(u.total_wagered ?? 0));
 
-    // Idempotency key bucketed per ISO-week so a rerun in the same week
-    // hits the email_log dedup and no-ops. ISO week number changes weekly.
     const weekKey = getIsoWeek(new Date());
-    const idempotencyKey = `rakeback-nudge:${u.id}:${weekKey}`;
+    const idempotencyKey = `rakeback-recap:${u.id}:${weekKey}`;
 
     const result = await sendEmail({
       to: u.email,
-      subject: `$${amount.toFixed(2)} rakeback ready to claim`,
+      subject: `You earned $${weekEarned.toFixed(2)} in rakeback this week`,
       category: "retention",
       userId: u.id,
       idempotencyKey,
       react: RakebackReady({
         username: u.username ?? "degen",
-        rakebackAmount: amount,
+        rakebackAmount: weekEarned,
         tierName: tier.label,
         tierPct: Math.round(tier.tierPct * 100),
       }),
     });
 
     if (result.sent) {
-      nudged++;
-      // Stamp nudge cooldown regardless of whether Resend 200'd, because
-      // the email_log row is what's authoritative for dedup. But stamping
-      // also lets the next query skip this user without hitting email_log.
+      recapped++;
       await supabase
         .from("users")
         .update({ last_rakeback_nudge_at: now })
@@ -105,16 +119,12 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    nudged,
+    recapped,
     skipped,
     candidates: candidates?.length ?? 0,
   });
 }
 
-/**
- * ISO week key in the format `2026-W17`. Used as the idempotency bucket so
- * multiple cron firings within the same week don't double-nudge.
- */
 function getIsoWeek(d: Date): string {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const dayNum = date.getUTCDay() || 7;

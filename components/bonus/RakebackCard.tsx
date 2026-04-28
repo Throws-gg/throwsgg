@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useAuthedFetch } from "@/hooks/useAuthedFetch";
 import { useUserStore } from "@/stores/userStore";
 import type { RakebackTier } from "@/lib/rakeback/tiers";
@@ -11,11 +10,10 @@ interface StatusResponse {
   tierLabel: string;
   tierPct: number;
   effectivePct: number;
-  claimable: number;
+  weekEarned: number;
   lifetime: number;
   totalWagered: number;
   edgeRate: number;
-  lastClaimAt: string | null;
   nextTier: {
     tier: RakebackTier;
     label: string;
@@ -24,16 +22,6 @@ interface StatusResponse {
     wageredToReach: number;
     threshold: number;
   } | null;
-}
-
-interface ClaimResponse {
-  claimed: boolean;
-  reason?: string;
-  amount: number;
-  newBalance?: number;
-  tier?: RakebackTier;
-  tierLabel?: string;
-  lifetime?: number;
 }
 
 const TIER_ACCENT: Record<RakebackTier, string> = {
@@ -47,13 +35,9 @@ const TIER_ACCENT: Record<RakebackTier, string> = {
 export function RakebackCard({ compact = false }: { compact?: boolean }) {
   const authedFetch = useAuthedFetch();
   const userId = useUserStore((s) => s.userId);
-  const setBalance = useUserStore((s) => s.setBalance);
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [claiming, setClaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [justClaimed, setJustClaimed] = useState<number | null>(null);
 
   const loadStatus = useCallback(async () => {
     if (!userId) return;
@@ -74,41 +58,7 @@ export function RakebackCard({ compact = false }: { compact?: boolean }) {
     loadStatus();
   }, [loadStatus]);
 
-  // Re-poll status after a claim so claimable zeros out and lifetime updates.
-  const handleClaim = useCallback(async () => {
-    if (!userId || claiming) return;
-    if (!status || status.claimable <= 0) return;
-    setClaiming(true);
-    setError(null);
-    try {
-      const res = await authedFetch("/api/rakeback/claim", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      const data = (await res.json()) as ClaimResponse;
-
-      if (!data.claimed) {
-        setError("Nothing to claim yet.");
-        await loadStatus();
-        return;
-      }
-
-      if (typeof data.newBalance === "number") {
-        setBalance(data.newBalance);
-      }
-      setJustClaimed(data.amount);
-      await loadStatus();
-    } catch {
-      setError("Couldn't claim right now. Try again.");
-    } finally {
-      setClaiming(false);
-    }
-  }, [authedFetch, claiming, loadStatus, setBalance, status, userId]);
-
   // Fill the bar from the current tier's floor to the next tier's floor.
-  // The API sends next.threshold (upper) and wageredToReach (delta), and we
-  // know totalWagered — so the current floor is totalWagered + wageredToReach - threshold's span.
-  // Simpler: derive the current-tier floor from the hardcoded ladder.
   const progressPct = useMemo(() => {
     if (!status?.nextTier) return 100;
     const prevFloor =
@@ -132,7 +82,6 @@ export function RakebackCard({ compact = false }: { compact?: boolean }) {
   if (!status) return null;
 
   const tierAccent = TIER_ACCENT[status.tier];
-  const canClaim = status.claimable > 0 && !claiming;
 
   return (
     <div className="rounded-xl border border-cyan/20 bg-gradient-to-br from-cyan/[0.08] via-cyan/[0.04] to-transparent overflow-hidden">
@@ -159,26 +108,24 @@ export function RakebackCard({ compact = false }: { compact?: boolean }) {
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="text-2xl font-bold text-white tabular-nums">
-              ${status.claimable.toFixed(2)}
+              ${status.weekEarned.toFixed(2)}
+              <span className="ml-1.5 text-[11px] font-normal text-white/40">
+                this week
+              </span>
             </div>
             <div className="text-[11px] text-white/45 mt-0.5">
-              {status.claimable > 0
-                ? "available to claim · direct to balance"
-                : "earn rakeback on every bet"}
+              auto-credited per bet · no claim, no wagering
             </div>
           </div>
 
-          <button
-            onClick={handleClaim}
-            disabled={!canClaim}
-            className={
-              canClaim
-                ? "px-4 py-2 rounded-lg bg-gradient-to-r from-cyan to-violet text-white text-sm font-semibold shadow-[0_0_16px_rgba(6,182,212,0.35)] hover:shadow-[0_0_22px_rgba(6,182,212,0.5)] transition-shadow"
-                : "px-4 py-2 rounded-lg bg-white/[0.03] text-white/30 text-sm font-semibold border border-white/5 cursor-not-allowed"
-            }
-          >
-            {claiming ? "Claiming…" : "Claim"}
-          </button>
+          <div className="text-right">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-cyan/70">
+              instant
+            </div>
+            <div className="text-[10px] text-white/35 font-mono mt-0.5">
+              every settled bet
+            </div>
+          </div>
         </div>
 
         {!compact && status.nextTier && (
@@ -202,28 +149,7 @@ export function RakebackCard({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
         )}
-
-        {error && (
-          <div className="mt-2 text-[11px] text-red-400/80">{error}</div>
-        )}
       </div>
-
-      <AnimatePresence>
-        {justClaimed !== null && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            onAnimationComplete={() =>
-              setTimeout(() => setJustClaimed(null), 2400)
-            }
-            className="px-4 pb-3 text-[11px] text-cyan/80 font-mono"
-          >
-            +${justClaimed.toFixed(2)} added to your balance.
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

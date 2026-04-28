@@ -5,17 +5,15 @@ import { trackServer } from "@/lib/analytics/posthog-server";
 import { getRakebackTier } from "@/lib/rakeback/tiers";
 
 /**
- * POST /api/rakeback/claim
+ * POST /api/rakeback/claim — LEGACY (post-033 rakeback is auto-credited).
  *
- * Atomically drains the user's rakeback_claimable → balance via the
- * claim_rakeback() RPC. No minimum. Returns the amount claimed, the new
- * balance, and the user's current tier.
+ * After migration 033, rakeback is credited to balance the moment a bet
+ * settles. This endpoint is kept ONLY as a back-compat drain for any user
+ * who somehow ended up with rakeback_claimable > 0 (e.g. a row that escaped
+ * the backfill, or a stale client retrying an old in-flight claim).
  *
- * Returns:
- *   200 { claimed: true, amount, newBalance, tier, lifetime }
- *   200 { claimed: false, reason: "nothing_to_claim", amount: 0 }
- *   401 unauthed
- *   500 rpc failure
+ * Modern clients no longer call this route. Returns 200 with claimed:false
+ * if there's nothing pending — safe and silent.
  */
 export async function POST(request: NextRequest) {
   let body: Record<string, unknown> = {};
@@ -48,12 +46,12 @@ export async function POST(request: NextRequest) {
   if (amount <= 0) {
     return NextResponse.json({
       claimed: false,
-      reason: "nothing_to_claim",
+      reason: "instant_rakeback_active",
       amount: 0,
     });
   }
 
-  // Fresh snapshot so the client can update the store without another refetch.
+  // Legacy drain executed — fetch fresh balance for client.
   const { data: user } = await supabase
     .from("users")
     .select("balance, total_wagered, rakeback_lifetime")
@@ -63,7 +61,7 @@ export async function POST(request: NextRequest) {
   const totalWagered = Number(user?.total_wagered ?? 0);
   const tier = getRakebackTier(totalWagered);
 
-  trackServer(authed.dbUserId, "rakeback_claimed", {
+  trackServer(authed.dbUserId, "rakeback_legacy_drain", {
     amount,
     tier: tier.tier,
     lifetime_total: Number(user?.rakeback_lifetime ?? 0),
