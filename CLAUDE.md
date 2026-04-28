@@ -45,7 +45,7 @@ rps/
       horses/page.tsx               # Form guide index — sortable + filterable
       horse/[slug]/page.tsx         # Per-horse profile + recent race history
       arena/page.tsx                # RPS game (not launching with this)
-      leaderboard/page.tsx          # Stub — wired to Phase 5 (streaks/leaderboard, deferred)
+      leaderboard/page.tsx          # Tipster leaderboard, ROI ranked, 4 windows, top 10
       history/page.tsx              # Bet history
       verify/page.tsx               # Provably fair verification
     (account)/
@@ -75,7 +75,9 @@ rps/
       horses, horses/[slug]         # Public form guide endpoints
       transactions                  # User ledger for /wallet
       geo-bypass, internal/log-geo-block
-      cron/                         # affiliate-tiers, affiliate-payouts, rakeback-nudge
+      cron/                         # affiliate-tiers, affiliate-payouts, rakeback-nudge (weekly recap), weekly-leaderboard, streak-at-risk
+      leaderboard, streak/          # Public leaderboard + streak status/top endpoints
+      race/wins-feed                # Public live-wins ticker feed
       webhooks/resend               # Email delivery events
       admin/                        # 14+ admin endpoints
   lib/
@@ -110,7 +112,7 @@ rps/
 
 ## Database schema (key tables)
 
-- **users** — balance, bonus_balance, wagering_remaining, total_wagered, total_profit, role, is_banned, is_affiliate, referrer_id, signup_fingerprint/ip, normalized_email, sweep_delegated_at, sweep_revoked_at, ata_initialized_at, rakeback_claimable, rakeback_lifetime, last_daily_claim_at, email_preferences (jsonb), email_unsubscribed_at, etc.
+- **users** — balance, bonus_balance, wagering_remaining, total_wagered, total_profit, role, is_banned, is_affiliate, referrer_id, signup_fingerprint/ip, normalized_email, sweep_delegated_at, sweep_revoked_at, ata_initialized_at, rakeback_claimable (legacy, drained by mig 033), rakeback_lifetime, current_streak, longest_streak, last_streak_day, last_streak_nudge_at, last_daily_claim_at, email_preferences (jsonb), email_unsubscribed_at, etc.
 - **horses** — 16 persistent. speed/stamina/form/consistency, ground_preference, career stats, last_5_results (jsonb of `{raceNumber, position}`), distance/ground/gate records, speed_rating, avg_finish, days_since_last_race.
 - **races** — race_number, status (betting/closed/racing/settled), distance, ground, server_seed, race_starts_at, financials.
 - **race_entries** — gate_position, opening_odds, current_odds, true_probability, finish_position, power_score, snapshot_form.
@@ -124,7 +126,7 @@ rps/
 - **email_log** — per-send dedup + open/click/bounce timestamps.
 - **admin_actions** — append-only audit (geo blocks, hot wallet alerts, referral self-blocks, affiliate approvals, etc).
 
-Key SQL functions: `update_balance()` (atomic), `place_race_bet_atomic()` (handles cash + bonus split, liability cap under row lock), `cancel_race_bet_atomic()`, `settle_race()` (self-heals, accrues rakeback + referral rewards), `accrue_rakeback()`, `claim_rakeback()`, `accrue_simple_referral_reward()` (20% NGR lifetime, with self-referral block), `daily_bonus_tier()`, `claim_daily_bonus()`, `rakeback_tier()`, `grant_signup_bonus()`, `normalize_email()`, `resolve_referral_code()`, `generate_referral_code()`.
+Key SQL functions: `update_balance()` (atomic), `place_race_bet_atomic()` (handles cash + bonus split, liability cap under row lock), `cancel_race_bet_atomic()`, `settle_race()` (self-heals, accrues rakeback + bumps streak + referral rewards), `accrue_rakeback()` (instant credit to balance, cash-portion only, mig 033), `claim_rakeback()` (legacy back-compat shim post-033), `bump_bet_streak()` (UTC-day idempotent, mig 035), `tipster_leaderboard()` (ROI ranking by window, mig 034), `accrue_simple_referral_reward()` (20% NGR lifetime, with self-referral block), `daily_bonus_tier()`, `claim_daily_bonus()`, `rakeback_tier()`, `grant_signup_bonus()`, `normalize_email()`, `resolve_referral_code()`, `generate_referral_code()`.
 
 ## Race cycle (3 minutes)
 
@@ -138,7 +140,7 @@ Key SQL functions: `update_balance()` (atomic), `place_race_bet_atomic()` (handl
 
 Driven by Vercel cron hitting `/api/race/tick` every minute. Tick checks timestamps and advances the state machine. Multiple ticks per cycle are safe (idempotent transitions).
 
-## What is DONE and shipped to prod (as of 2026-04-27)
+## What is DONE and shipped to prod (as of 2026-04-28)
 
 Core gameplay:
 - Race engine (create, close, simulate, settle), provably fair (HMAC-SHA256, deterministic), 16 horses with sprites, Monte Carlo odds (4000 iterations, 1.10 overround), atomic bet placement with bonus-aware accounting + per-horse liability cap, race animation with per-horse sprites + dust trails + winner glow, podium results screen.
@@ -162,7 +164,12 @@ Auth + accounts:
 Bonus + retention:
 - Signup bonus ($20, first 100 only, 14-day expiry, 3x wagering, FingerprintJS dedup, IP/email dedup, self-referral block).
 - Daily login bonus (Bronze $0.10 / Silver $0.20 / Gold $0.35 / Platinum $0.50 / Diamond $1.00 — same ladder as rakeback).
-- Rakeback (5/10/15/20/25% of edge, user-claimed, direct to balance, no wagering — at $0/$500/$5K/$25K/$100K wagered).
+- Rakeback (5/10/15/20/25% of edge — at $0/$500/$5K/$25K/$100K wagered). **INSTANT auto-credit per settled bet (mig 033)** — no claim button. Bonus-funded stake portion is excluded; only cash wagering earns rakeback. Inline "+$0.04 rakeback" toast on the racing results screen. Weekly recap email instead of a claim nudge.
+- Daily bet streak (mig 035) — consecutive UTC-days with ≥1 settled bet. Visible on /profile (current/longest/at-risk) and as `🔥N` next to chat handles. Streak-at-risk email at 20:00 UTC for ≥3-day streaks aged yesterday.
+- Tipster leaderboard (mig 034) on `/leaderboard` — ranked by ROI on cash bets, 4 windows (day/week/month/all), min 10 bets + $50 staked to qualify. Bonus-funded stake excluded. Top 3 weekly get 🔥/⚡/✨ badges in chat. Weekly recap email Mondays 00:30 UTC (no prize pool at launch).
+- Live wins ticker on landing (live mode) and racing page — pulled from `/api/race/wins-feed`, anonymous-readable, 10s edge cache, no fake data.
+- Photo-finish near-miss line on lost bets when within 2 lengths of the payout cutoff: `1.4L from $42.00`.
+- Inline "Verify this race yourself" CTA on the results screen → `/verify?race=N` (deep-link auto-runs once).
 - Bonus cancel + payout routing (settle_race routes payouts proportionally to cash/bonus).
 - Bonus rules loosened pre-launch (max-bet $100, min-odds 1.0).
 - Cash + bonus combined betting (frictionless): client subscribes reactively, stake auto-caps to `min(amount, totalFunds, MAX_BET, liability)` on submit. UI shows split as `$X cash + $Y bonus`.
@@ -213,9 +220,9 @@ Animations + UI:
 - Sound design (Howler.js installed but no assets).
 
 **Post-launch nice-to-haves:**
-- Tipster leaderboard + streaks (Phase 5 — replaces the leaderboard stub, unlocks 4 already-built email templates).
-- Horse following + per-horse notifications.
-- Win card auto-share-to-X flow (component exists, needs wiring).
+- Horse following + per-horse notifications ("Thunderbolt is racing in 5 min").
+- Telegram bot for race alerts + unsettled winnings + VIP DM channel.
+- Tier 1 retention: weekly Furlong Champions wager race (real prize pool), web push notifications, deposit insurance (25% back capped $25, first-deposit only), chat rain seeding.
 - Telegram Mini-App distribution channel.
 - IPQS VPN/proxy detection + Chainalysis sanctions screening (pair with Anjouan licence application).
 
@@ -224,7 +231,7 @@ Animations + UI:
 1. **Existing 11 users from before 2026-04-25 didn't go through the delegation modal.** Their next /wallet visit will surface the violet "Authorize & continue" card. Until they delegate, their on-chain USDC won't sweep. Happens organically.
 2. **`SWEEP_ENABLED=true` is on Production scope only.** If you ever test on Vercel preview deploys, set it there too.
 3. **Privy app is on Production tier**, same app ID. There is no separate "Dev" environment to flip — config (signers, policies) is already live.
-4. **Migration 032 is the latest applied to prod** (adds users.is_affiliate). All earlier migrations are also applied.
+4. **Migration 035 is the latest applied to prod** (daily bet streak + bump_bet_streak in settle_race). Migrations 033 (instant rakeback) and 034 (tipster leaderboard) are also applied. All earlier migrations are also applied.
 
 ## Recent migrations applied to prod (April 2026)
 
@@ -245,6 +252,9 @@ All `CREATE OR REPLACE` / `ADD COLUMN IF NOT EXISTS` style — safe to re-run.
 - **030** — backfill `users.wallet_address` from `deposit_addresses.address` (one-shot, fixed 11 historical users)
 - **031** — sweep delegation (`users.sweep_delegated_at`, `users.sweep_revoked_at` + partial index)
 - **032** — `users.is_affiliate` add (collided with another 017; only the column add was needed since migration 019 already superseded the function rewrite from the original 017)
+- **033** — instant rakeback. `accrue_rakeback` credits balance directly per settled bet, excludes bonus-funded stake portion, one-shot drain of legacy `rakeback_claimable` to balance with `rakeback_backfill_033` audit txs. `claim_rakeback` kept as back-compat shim.
+- **034** — tipster leaderboard. `tipster_leaderboard(window, limit, min_bets, min_cash)` RPC + partial index on settled bets. Pure cash-skill ROI ranking.
+- **035** — daily bet streak. `current_streak`/`longest_streak`/`last_streak_day`/`last_streak_nudge_at` columns + `bump_bet_streak()` called from `settle_race`. UTC-day idempotent.
 
 ## Bonus economics (for reference)
 
@@ -343,3 +353,4 @@ ADMIN_SESSION_SALT                   # ≥32 chars (also used to sign unsubscrib
 - **2026-04-25:** Wallet-address null bug fixed (server-side Privy lookup); `useDelegatedActions` → `useSigners` migration for TEE wallets; full deposit→sweep pipeline shipped and verified end-to-end on mainnet ($1 USDC swept from user wallet to hot wallet ATA, signature `5k7sE6Gv...`).
 - **2026-04-26:** Verifying-authorization UX (silent polling instead of scary 409 during Privy consistency window).
 - **2026-04-27:** /referrals 404 fix (migration 032), /horses React #31 fix, /profile VIP rewrite (unified with rakeback ladder), privacy policy page, frictionless bet sizing (cash+bonus reactive subscription, auto-cap on submit, split surfaced in stake summary).
+- **2026-04-28:** Tier 0 retention/engagement shipped across 4 commits. Migrations 033/034/035. Instant rakeback (no claim button, cash-portion only, +$X toast on settle). Tipster leaderboard ROI-ranked with 4 windows, top-3 chat flame badges. Daily bet streak (UTC-day, profile card, chat handle). Live wins ticker (real data, replaces orphan). Photo-finish near-miss framing on losing bets. Inline "Verify this race" CTA + deep-link auto-run. Three new crons (rakeback weekly recap repurposed, weekly leaderboard email, streak-at-risk daily 20:00 UTC).
