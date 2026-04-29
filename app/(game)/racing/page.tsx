@@ -526,8 +526,6 @@ export default function RacingPage() {
             const isLongshot = entry.currentOdds >= 15;
             // Ground match — colour the silks ring if this horse prefers today's going.
             const groundMatch = h.groundPreference === currentRace.ground;
-            // Implied win % from decimal odds.
-            const impliedPct = entry.currentOdds > 0 ? (100 / entry.currentOdds) : 0;
 
             return (
               <button
@@ -651,9 +649,6 @@ export default function RacingPage() {
                           !isFav && entry.currentOdds >= 8 && "text-base text-green/80"
                         )}>
                           {entry.currentOdds.toFixed(2)}
-                        </span>
-                        <span className="text-[8px] text-white/25 font-mono mt-0.5 tabular-nums">
-                          {impliedPct.toFixed(0)}%
                         </span>
                       </div>
                       {isBetting && (
