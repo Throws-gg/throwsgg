@@ -40,14 +40,15 @@ function AnimatedNumber({ value, duration = 1800, prefix = "", suffix = "" }: { 
 // ============================================================
 
 interface MiniRaceState {
-  currentRace?: { raceNumber: number };
+  currentRace?: { raceNumber: number; bettingClosesAt: string; raceStartsAt: string };
   phase?: "betting" | "closed" | "racing" | "results";
   timeRemaining?: number;
 }
 
+const RACE_DURATION_SEC = 20;
+
 function LiveStatusBar() {
   const [state, setState] = useState<MiniRaceState | null>(null);
-  const [lastFetch, setLastFetch] = useState(0);
   const [now, setNow] = useState(0);
 
   useEffect(() => {
@@ -57,7 +58,7 @@ function LiveStatusBar() {
         const r = await fetch("/api/race/state", { cache: "no-store" });
         if (!r.ok) return;
         const d = await r.json();
-        if (!cancelled) { setState(d); setLastFetch(Date.now()); }
+        if (!cancelled) setState(d);
       } catch {}
     };
     load();
@@ -72,8 +73,14 @@ function LiveStatusBar() {
 
   if (!state?.currentRace) return null;
 
-  const elapsed = now > 0 && lastFetch > 0 ? (now - lastFetch) / 1000 : 0;
-  const live = Math.max(0, (state.timeRemaining ?? 0) - elapsed);
+  // Anchor on absolute deadlines so the timer can't tick up between polls.
+  const race = state.currentRace;
+  const phase = state.phase;
+  const deadline =
+    phase === "betting" ? new Date(race.bettingClosesAt).getTime() :
+    phase === "racing" ? new Date(race.raceStartsAt).getTime() + RACE_DURATION_SEC * 1000 :
+    new Date(race.raceStartsAt).getTime();
+  const live = now > 0 ? Math.max(0, (deadline - now) / 1000) : (state.timeRemaining ?? 0);
   const phaseLabel =
     state.phase === "betting" ? "betting closes in" :
     state.phase === "closed" ? "gates loading" :
@@ -405,7 +412,7 @@ export default function LandingPage() {
               >
                 A new race every<br />
                 three minutes.<br />
-                <span className="text-cyan">No KYC. No bullshit.</span>
+                <span className="text-cyan">Provably fair.</span>
               </motion.h1>
 
               {/* Deck */}
@@ -415,8 +422,8 @@ export default function LandingPage() {
                 transition={{ duration: 0.6, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
                 className="text-[15px] text-white/55 max-w-[460px] mx-auto lg:mx-0 leading-relaxed"
               >
-                USDC in, USDC out. Sixteen horses, eight per race, fixed odds.
-                Don&rsquo;t trust us — verify the seed.
+                Virtual horse racing on Solana. USDC in, USDC out.
+                Sixteen horses, eight per race, fixed odds. Don&rsquo;t trust us — verify the seed.
               </motion.p>
 
               {/* CTAs */}
@@ -633,13 +640,13 @@ export default function LandingPage() {
               },
               {
                 title: "Solana-native",
-                desc: "USDC + SOL. Withdrawals in seconds, not days. We&rsquo;re the house, but we&rsquo;re not your bank.",
+                desc: "USDC + SOL. Withdrawals in seconds, not days. We’re the house, but we’re not your bank.",
                 tag: "solana",
               },
               {
-                title: "No KYC",
-                desc: "Connect a wallet. Bet. Done. No passport, no email, no permission slip to back a horse.",
-                tag: "wallet only",
+                title: "Wallet-native",
+                desc: "Connect a Solana wallet and you’re in. No accounts, no email required, no friction between you and the next race.",
+                tag: "self-custody flow",
               },
             ].map((item, i) => (
               <motion.div

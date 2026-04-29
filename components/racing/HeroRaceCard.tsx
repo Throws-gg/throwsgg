@@ -40,6 +40,25 @@ interface RaceState {
   waiting?: boolean;
 }
 
+const RACE_DURATION_SEC = 20;
+const RESULTS_DURATION_SEC = 15;
+
+/**
+ * Compute the absolute deadline (ms epoch) for the active phase.
+ * This anchors the countdown to a fixed point in time so the visible
+ * timer can never tick *up* between server polls — it's a pure function
+ * of the server's stable phase-boundary timestamps.
+ */
+function deadlineFor(phase: Phase, race: RaceState["currentRace"]): number {
+  const raceStart = new Date(race.raceStartsAt).getTime();
+  if (phase === "betting" || phase === "closed") {
+    // For betting we want bettingClosesAt; for closed we want raceStartsAt
+    return phase === "betting" ? new Date(race.bettingClosesAt).getTime() : raceStart;
+  }
+  if (phase === "racing") return raceStart + RACE_DURATION_SEC * 1000;
+  return raceStart + (RACE_DURATION_SEC + RESULTS_DURATION_SEC) * 1000;
+}
+
 const POLL_MS = 2000;
 
 function formatCountdown(seconds: number): string {
@@ -51,7 +70,6 @@ function formatCountdown(seconds: number): string {
 
 export function HeroRaceCard() {
   const [state, setState] = useState<RaceState | null>(null);
-  const [lastFetch, setLastFetch] = useState<number>(0);
   const [now, setNow] = useState<number>(0);
 
   useEffect(() => {
@@ -61,10 +79,7 @@ export function HeroRaceCard() {
         const res = await fetch("/api/race/state", { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as RaceState;
-        if (!cancelled) {
-          setState(data);
-          setLastFetch(Date.now());
-        }
+        if (!cancelled) setState(data);
       } catch {
         // silent
       }
@@ -84,8 +99,12 @@ export function HeroRaceCard() {
   }
 
   const { currentRace, phase } = state;
-  const elapsedSinceFetch = now > 0 && lastFetch > 0 ? (now - lastFetch) / 1000 : 0;
-  const liveSeconds = Math.max(0, state.timeRemaining - elapsedSinceFetch);
+  // Anchor countdown to the absolute server-provided deadline. The server
+  // sends stable phase-boundary timestamps (bettingClosesAt, raceStartsAt) on
+  // every response — even cached ones — so the visible timer monotonically
+  // ticks down regardless of cache age or network jitter.
+  const deadlineMs = deadlineFor(phase, currentRace);
+  const liveSeconds = now > 0 ? Math.max(0, (deadlineMs - now) / 1000) : state.timeRemaining;
 
   return (
     <motion.div
@@ -143,13 +162,16 @@ export function HeroRaceCard() {
         </AnimatePresence>
       </div>
 
-      {/* Footer — seed hash + total volume */}
+      {/* Footer — commit hash + total volume.
+          Pre-race we show the SHA-256 *commitment* of the server seed; the seed
+          itself stays hidden until settle. Showing the commit doesn't leak
+          results — that's the entire point of commit-reveal. */}
       <div className="border-t border-white/[0.05] px-4 py-2.5 flex items-center justify-between text-[10px] font-mono">
         <a
           href={phase === "results" ? `/verify?race=${currentRace.raceNumber}` : "/verify"}
           className="text-white/30 hover:text-cyan transition-colors flex items-center gap-1.5 group"
         >
-          <span className="text-white/20 uppercase tracking-wider">seed</span>
+          <span className="text-white/25 uppercase tracking-wider">{phase === "results" ? "seed" : "commit"}</span>
           <span className="text-white/55 group-hover:text-cyan transition-colors">
             {currentRace.serverSeedHash?.slice(0, 8) ?? "—"}…{currentRace.serverSeedHash?.slice(-4) ?? ""}
           </span>
