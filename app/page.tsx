@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { LiveWinsTicker } from "@/components/racing/LiveWinsTicker";
 import { HeroRaceCard } from "@/components/racing/HeroRaceCard";
+import { HorseSprite } from "@/components/racing/HorseSprite";
 import { track } from "@/lib/analytics/posthog";
 
 const IS_LIVE = process.env.NEXT_PUBLIC_IS_LIVE === "true";
@@ -184,57 +185,87 @@ function FormGuideRail() {
 
   if (!horses.length) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-white/[0.05] bg-white/[0.01] h-28 animate-pulse" />
+      <div className="flex gap-4 overflow-hidden">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="shrink-0 w-[260px] h-[180px] rounded-xl border border-white/[0.05] bg-white/[0.01] animate-pulse" />
         ))}
       </div>
     );
   }
 
+  // Duplicate the list so translateX(-50%) loops seamlessly.
+  const loop = [...horses, ...horses];
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      {horses.slice(0, 8).map((h) => (
-        <Link
-          key={h.id}
-          href={`/horse/${h.slug}`}
-          className="group rounded-xl border border-white/[0.05] bg-white/[0.012] p-4 space-y-3 hover:border-white/[0.12] hover:bg-white/[0.025] transition-all"
-        >
-          <div className="flex items-center gap-2">
+    <div className="relative -mx-4 sm:-mx-6 overflow-hidden">
+      {/* Edge masks so cards fade in/out at the rail edges instead of clipping */}
+      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 sm:w-24 z-10 bg-gradient-to-r from-background to-transparent" />
+      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 sm:w-24 z-10 bg-gradient-to-l from-background to-transparent" />
+
+      <div className="flex gap-4 px-4 sm:px-6 w-max animate-[ticker-scroll_70s_linear_infinite] hover:[animation-play-state:paused]">
+        {loop.map((h, i) => (
+          <Link
+            key={`${h.id}-${i}`}
+            href={`/horse/${h.slug}`}
+            className="group shrink-0 w-[260px] rounded-xl border border-white/[0.06] bg-[#0B0B12]/80 backdrop-blur-sm overflow-hidden
+                       hover:border-white/[0.14] hover:bg-white/[0.025] transition-all"
+          >
+            {/* Card top — sprite stage with the horse's silk-colour wash */}
             <div
-              className="w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-mono font-bold text-white/95 shrink-0"
-              style={{ backgroundColor: h.color, boxShadow: `inset 0 -1px 2px rgba(0,0,0,0.3)` }}
+              className="relative h-[110px] flex items-end justify-center overflow-hidden"
+              style={{
+                background: `linear-gradient(180deg, ${h.color}18 0%, transparent 70%)`,
+              }}
             >
-              {h.careerWins}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-white/85 truncate">{h.name}</div>
-              <div className="text-[9px] font-mono text-white/30 tabular-nums">
-                {h.careerRaces} starts · {h.winPct.toFixed(0)}% win
+              {/* Faint racetrack hairline at the bottom */}
+              <div className="absolute bottom-0 inset-x-0 h-px bg-white/[0.08]" />
+              {/* Saddle-cloth gate marker top-right */}
+              <div
+                className="absolute top-3 right-3 w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-mono font-bold text-white/95"
+                style={{ backgroundColor: h.color, boxShadow: `inset 0 -1px 2px rgba(0,0,0,0.35)` }}
+              >
+                {h.careerWins}
+              </div>
+              {/* Sprite — sits on the racetrack hairline */}
+              <div className="pb-2 group-hover:translate-y-[-2px] transition-transform">
+                <HorseSprite slug={h.slug} size={84} />
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-[8px] font-mono text-white/25 uppercase tracking-wider mr-1">last 5</span>
-            {h.last5Results.length === 0 ? (
-              <span className="text-[9px] font-mono text-white/20">—</span>
-            ) : (
-              h.last5Results.slice(0, 5).map((pos, i) => (
-                <span
-                  key={i}
-                  className={`text-[9px] font-mono w-4 h-4 rounded-sm flex items-center justify-center tabular-nums ${
-                    pos === 1 ? "bg-cyan/20 text-cyan" :
-                    pos <= 3 ? "bg-white/[0.06] text-white/70" :
-                    "bg-white/[0.02] text-white/30"
-                  }`}
-                >
-                  {pos}
+
+            {/* Card body — name + record + form */}
+            <div className="px-4 py-3 space-y-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold text-white/90 truncate">{h.name}</span>
+                <span className="text-[10px] font-mono text-white/40 tabular-nums shrink-0">
+                  {h.careerRaces} starts
                 </span>
-              ))
-            )}
-          </div>
-        </Link>
-      ))}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] font-mono text-white/30 uppercase tracking-wider mr-1">last 5</span>
+                {h.last5Results.length === 0 ? (
+                  <span className="text-[9px] font-mono text-white/25">—</span>
+                ) : (
+                  h.last5Results.slice(0, 5).map((pos, j) => (
+                    <span
+                      key={j}
+                      className={`text-[9px] font-mono w-4 h-4 rounded-sm flex items-center justify-center tabular-nums ${
+                        pos === 1 ? "bg-cyan/20 text-cyan" :
+                        pos <= 3 ? "bg-white/[0.06] text-white/70" :
+                        "bg-white/[0.025] text-white/35"
+                      }`}
+                    >
+                      {pos}
+                    </span>
+                  ))
+                )}
+                <span className="ml-auto text-[10px] font-mono text-white/45 tabular-nums">
+                  {h.winPct.toFixed(0)}% win
+                </span>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
