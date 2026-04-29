@@ -122,7 +122,7 @@ function TrustStrip() {
           ].map((f) => (
             <div key={f.k} className="bg-[#08080D] px-6 py-7 flex flex-col gap-2">
               <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/30">{f.k}</span>
-              <span className="font-display text-2xl sm:text-3xl text-white/95 tracking-tight" style={{ fontVariationSettings: "'opsz' 144" }}>{f.v}</span>
+              <span className="font-display text-2xl sm:text-3xl text-white tracking-[-0.02em] font-semibold">{f.v}</span>
             </div>
           ))}
         </div>
@@ -145,7 +145,7 @@ function Stat({ label, value, prefix = "", suffix = "" }: { label: string; value
   return (
     <div className="bg-[#08080D] px-6 py-7 flex flex-col gap-2">
       <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/30">{label}</span>
-      <span className="font-display text-3xl sm:text-4xl text-white/95 tracking-tight" style={{ fontVariationSettings: "'opsz' 144" }}>
+      <span className="font-display text-3xl sm:text-4xl text-white tracking-[-0.02em] font-semibold">
         <AnimatedNumber value={value} prefix={prefix} suffix={suffix} />
       </span>
     </div>
@@ -389,7 +389,7 @@ export default function LandingPage() {
                 ) : (
                   <div className="inline-flex items-center gap-2 bg-white/[0.03] border border-white/[0.08] rounded-full px-3 py-1">
                     <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
-                    <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-white/55">
+                    <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-white/65">
                       {IS_LIVE ? "live now" : "engine running · gates open soon"}
                     </span>
                   </div>
@@ -401,12 +401,11 @@ export default function LandingPage() {
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.7, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
-                className="font-display text-[44px] sm:text-[60px] lg:text-[76px] leading-[0.95] tracking-[-0.025em] text-white/95 font-light"
-                style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
+                className="font-display text-[44px] sm:text-[58px] lg:text-[72px] leading-[0.95] tracking-[-0.035em] text-white font-semibold"
               >
-                Eight horses.<br />
-                Three minutes.<br />
-                <span className="italic text-cyan/95" style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 100" }}>Fixed odds.</span>
+                A new race every<br />
+                three minutes.<br />
+                <span className="text-cyan">No KYC. No bullshit.</span>
               </motion.h1>
 
               {/* Deck */}
@@ -414,10 +413,10 @@ export default function LandingPage() {
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                className="text-[15px] text-white/45 max-w-[440px] mx-auto lg:mx-0 leading-relaxed"
+                className="text-[15px] text-white/55 max-w-[460px] mx-auto lg:mx-0 leading-relaxed"
               >
-                Virtual horse racing on Solana. USDC in, USDC out, no account needed to watch.
-                Every race verifiable via HMAC-SHA256.
+                USDC in, USDC out. Sixteen horses, eight per race, fixed odds.
+                Don&rsquo;t trust us — verify the seed.
               </motion.p>
 
               {/* CTAs */}
@@ -520,12 +519,12 @@ export default function LandingPage() {
       <section className="py-20 sm:py-28 px-4">
         <div className="max-w-5xl mx-auto space-y-14">
           <div className="text-center max-w-xl mx-auto space-y-3">
-            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/35">The cycle</span>
-            <h2 className="font-display text-3xl sm:text-5xl text-white/95 tracking-tight font-light leading-[1.05]" style={{ fontVariationSettings: "'opsz' 144" }}>
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/40">The cycle</span>
+            <h2 className="font-display text-3xl sm:text-5xl text-white tracking-[-0.03em] font-semibold leading-[1.05]">
               How a race runs.
             </h2>
-            <p className="text-[14px] text-white/40 leading-relaxed">
-              Every three minutes, end-to-end. Bet, watch, settle, repeat — 480 times a day.
+            <p className="text-[14px] text-white/55 leading-relaxed">
+              Three minutes, end-to-end. Bet, watch, settle, repeat. 480× a day, 24/7.
             </p>
           </div>
 
@@ -536,10 +535,10 @@ export default function LandingPage() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-px">
               {[
-                { phase: "betting", label: "Betting", duration: "90s", desc: "Read the form, lock your odds", color: "#34D399" },
-                { phase: "closed",  label: "Gates",   duration: "15s", desc: "Field loaded, last call", color: "#F59E0B" },
-                { phase: "racing",  label: "Race",    duration: "20s", desc: "Eight horses, one finish line", color: "#EC4899" },
-                { phase: "settle",  label: "Settle",  duration: "15s", desc: "Winners paid, seed revealed", color: "#06B6D4" },
+                { phase: "betting", label: "Bet", duration: "90s", desc: "Read the form, lock your odds.", color: "#34D399" },
+                { phase: "closed",  label: "Gates",   duration: "15s", desc: "Field loaded. Last call.", color: "#F59E0B" },
+                { phase: "racing",  label: "Race",    duration: "20s", desc: "Eight horses. One finish line.", color: "#EC4899" },
+                { phase: "settle",  label: "Settle",  duration: "15s", desc: "Winners paid. Seed revealed.", color: "#06B6D4" },
               ].map((p, i) => (
                 <motion.div
                   key={p.phase}
@@ -555,8 +554,8 @@ export default function LandingPage() {
                     </div>
                     <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/40">{p.duration}</span>
                   </div>
-                  <h3 className="font-display text-2xl text-white/95 tracking-tight mb-1.5" style={{ fontVariationSettings: "'opsz' 144" }}>{p.label}</h3>
-                  <p className="text-[12px] text-white/40 leading-snug">{p.desc}</p>
+                  <h3 className="font-display text-2xl text-white tracking-[-0.02em] mb-1.5 font-semibold">{p.label}</h3>
+                  <p className="text-[12px] text-white/55 leading-snug">{p.desc}</p>
                 </motion.div>
               ))}
             </div>
@@ -571,15 +570,15 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto space-y-12">
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div className="space-y-2 max-w-xl">
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/35">The roster</span>
-              <h2 className="font-display text-3xl sm:text-5xl text-white/95 tracking-tight font-light leading-[1.05]" style={{ fontVariationSettings: "'opsz' 144" }}>
-                The field.
+              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/40">The roster</span>
+              <h2 className="font-display text-3xl sm:text-5xl text-white tracking-[-0.03em] font-semibold leading-[1.05]">
+                Sixteen horses. Eight per race.
               </h2>
-              <p className="text-[14px] text-white/40 leading-relaxed">
-                Sixteen persistent horses. Real form, real records. Eight run each race.
+              <p className="text-[14px] text-white/55 leading-relaxed">
+                Real form. Real records. Learn them or get cooked.
               </p>
             </div>
-            <Link href="/horses" className="text-[12px] font-mono uppercase tracking-[0.16em] text-white/40 hover:text-white transition-colors">
+            <Link href="/horses" className="text-[12px] font-mono uppercase tracking-[0.16em] text-white/45 hover:text-white transition-colors">
               full form guide →
             </Link>
           </div>
@@ -595,13 +594,13 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto space-y-8">
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div className="space-y-2">
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/35">Recent payouts</span>
-              <h2 className="font-display text-3xl sm:text-4xl text-white/95 tracking-tight font-light leading-[1.05]" style={{ fontVariationSettings: "'opsz' 144" }}>
-                Pick any one. Audit it yourself.
+              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/40">Recent payouts</span>
+              <h2 className="font-display text-3xl sm:text-4xl text-white tracking-[-0.03em] font-semibold leading-[1.05]">
+                Don&rsquo;t trust us. Verify the seed.
               </h2>
             </div>
-            <Link href="/verify" className="text-[12px] font-mono uppercase tracking-[0.16em] text-white/40 hover:text-white transition-colors">
-              how verification works →
+            <Link href="/verify" className="text-[12px] font-mono uppercase tracking-[0.16em] text-white/45 hover:text-white transition-colors">
+              how it works →
             </Link>
           </div>
           <RecentResultsRail />
@@ -614,9 +613,9 @@ export default function LandingPage() {
       <section className="py-20 sm:py-28 px-4 border-t border-white/[0.04]">
         <div className="max-w-5xl mx-auto space-y-12">
           <div className="text-center max-w-xl mx-auto space-y-3">
-            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/35">The shape of it</span>
-            <h2 className="font-display text-3xl sm:text-5xl text-white/95 tracking-tight font-light leading-[1.05]" style={{ fontVariationSettings: "'opsz' 144" }}>
-              Why we built it this way.
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/40">What you get</span>
+            <h2 className="font-display text-3xl sm:text-5xl text-white tracking-[-0.03em] font-semibold leading-[1.05]">
+              Built different.
             </h2>
           </div>
 
@@ -624,22 +623,22 @@ export default function LandingPage() {
             {[
               {
                 title: "Provably fair",
-                desc: "Server-seed hash committed before each race. Reveal after. Recompute the outcome yourself.",
+                desc: "Seed committed before the race, revealed after. Recompute the outcome yourself. Trust nobody.",
                 tag: "HMAC-SHA256",
               },
               {
                 title: "Fixed odds",
-                desc: "Odds lock the moment you click. No parimutuel, no last-second drift, no mystery payout.",
+                desc: "Odds lock the moment you click. No parimutuel rug, no last-second drift, no mystery payout.",
                 tag: "no slippage",
               },
               {
-                title: "Crypto-native",
-                desc: "USDC and SOL on Solana. Withdrawals in seconds, not days. Larger ones reviewed for sanity.",
+                title: "Solana-native",
+                desc: "USDC + SOL. Withdrawals in seconds, not days. We&rsquo;re the house, but we&rsquo;re not your bank.",
                 tag: "solana",
               },
               {
                 title: "No KYC",
-                desc: "Connect a wallet. Bet. Done. We don’t ask for a passport so you can back a horse.",
+                desc: "Connect a wallet. Bet. Done. No passport, no email, no permission slip to back a horse.",
                 tag: "wallet only",
               },
             ].map((item, i) => (
@@ -652,12 +651,12 @@ export default function LandingPage() {
                 className="relative rounded-xl border border-white/[0.06] bg-white/[0.012] p-6 sm:p-7 space-y-2.5 hover:border-white/[0.12] hover:bg-white/[0.02] transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <h3 className="font-display text-xl text-white/95 tracking-tight" style={{ fontVariationSettings: "'opsz' 24" }}>
+                  <h3 className="font-display text-xl text-white tracking-[-0.02em] font-semibold">
                     {item.title}
                   </h3>
-                  <span className="text-[9px] font-mono uppercase tracking-[0.16em] text-white/30">{item.tag}</span>
+                  <span className="text-[9px] font-mono uppercase tracking-[0.16em] text-white/40">{item.tag}</span>
                 </div>
-                <p className="text-[13px] text-white/45 leading-relaxed">{item.desc}</p>
+                <p className="text-[13px] text-white/55 leading-relaxed">{item.desc}</p>
               </motion.div>
             ))}
           </div>
@@ -675,15 +674,15 @@ export default function LandingPage() {
           }}
         />
         <div className="relative z-10 max-w-2xl mx-auto text-center space-y-8">
-          <h2 className="font-display text-4xl sm:text-6xl text-white/95 tracking-tight font-light leading-[1.02]" style={{ fontVariationSettings: "'opsz' 144" }}>
+          <h2 className="font-display text-4xl sm:text-6xl text-white tracking-[-0.035em] font-semibold leading-[1.02]">
             {IS_LIVE ? (
-              <>The next race starts in<br /><span className="italic text-cyan/95" style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 100" }}>under three minutes.</span></>
+              <>Next race in<br /><span className="text-cyan">under three minutes.</span></>
             ) : (
-              <>The engine is running.<br /><span className="italic text-cyan/95" style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 100" }}>Get the first invite.</span></>
+              <>Engine&rsquo;s running.<br /><span className="text-cyan">Gates open soon.</span></>
             )}
           </h2>
 
-          <p className="text-[14px] text-white/40">
+          <p className="text-[14px] text-white/55">
             {IS_LIVE
               ? "Watch one before you bet. No signup needed."
               : "Real engine. Real races. Just not open to the public yet."}

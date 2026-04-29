@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Outfit, Fraunces, JetBrains_Mono } from "next/font/google";
+import { Outfit, Geist, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/components/layout/Providers";
 import { Navbar } from "@/components/layout/Navbar";
 import { MobileNav } from "@/components/layout/MobileNav";
@@ -11,10 +11,9 @@ const outfit = Outfit({
   subsets: ["latin"],
 });
 
-const fraunces = Fraunces({
+const geist = Geist({
   variable: "--font-display",
   subsets: ["latin"],
-  axes: ["opsz", "SOFT"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -34,7 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${outfit.variable} ${fraunces.variable} ${jetbrainsMono.variable} dark`}>
+    <html lang="en" className={`${outfit.variable} ${geist.variable} ${jetbrainsMono.variable} dark`}>
       <body className="min-h-screen flex flex-col bg-background text-foreground antialiased">
         <Providers>
           <Navbar />
