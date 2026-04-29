@@ -14,7 +14,7 @@ import { sendEmail } from "@/lib/email/send";
 import WithdrawalSent from "@/lib/email/templates/WithdrawalSent";
 
 // Auto-send threshold — withdrawals above this require manual admin approval
-const AUTO_SEND_THRESHOLD = 100;
+const AUTO_SEND_THRESHOLD = 500;
 
 // Rate limit: max withdrawals per user per 24h
 const MAX_WITHDRAWALS_PER_DAY = 3;

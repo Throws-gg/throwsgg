@@ -45,7 +45,7 @@ export default function TermsPage() {
           <li>Deposits are accepted in USDC and SOL on the Solana blockchain via Privy embedded wallets.</li>
           <li>Your balance is denominated in USD. Crypto deposits are converted to USD at the current market rate at the time of deposit.</li>
           <li>Minimum deposit: $1 USD. Minimum withdrawal: $5 USD.</li>
-          <li>Withdrawals are processed in USDC on Solana. Small withdrawals (under $100) are processed automatically. Larger withdrawals may require manual review and take up to 24 hours.</li>
+          <li>Withdrawals are processed in USDC on Solana. Withdrawals under $500 are processed automatically. Larger withdrawals may require manual review and take up to 24 hours.</li>
           <li>You are responsible for providing a valid Solana wallet address. We are not liable for funds sent to an incorrect address.</li>
           <li>We reserve the right to request identity verification before processing withdrawals if suspicious activity is detected.</li>
         </ul>

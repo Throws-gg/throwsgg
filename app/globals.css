@@ -8,7 +8,8 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
   --font-heading: var(--font-sans);
 
   /* shadcn semantic tokens */
@@ -213,4 +214,16 @@
 @keyframes ticker-scroll {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
+}
+
+/* Hero horizon shimmer — a thin highlight running across the racetrack-fold line */
+@keyframes horizon-shimmer {
+  0% { transform: translateX(-100%); opacity: 0; }
+  20% { opacity: 0.8; }
+  80% { opacity: 0.8; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+.animate-horizon-shimmer {
+  animation: horizon-shimmer 6s ease-in-out infinite;
 }
