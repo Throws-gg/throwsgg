@@ -29,15 +29,16 @@ export const OVERROUND = 1.10;  // 110% — ~9.09% house edge
 // we don't hide the overround, we just don't headline it. Aim is to
 // lower this over time as bankroll + handle grow.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
-// Odds caps — kept wide so the book percentage lands near OVERROUND and
-// longshots price honestly. A horse with true 0.5% prob needs ~170x to
-// break even for the bettor; under 100x we were charging the bettor a
-// structural 50%+ house edge on bombs. Liability is capped separately
-// via BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO so a single 200x bet on
-// a $100 max stake can only expose us to $20k (2× the $10k bankroll max
-// race liability — clipped in bet placement).
+// Odds caps — kept wide enough that the book percentage lands near OVERROUND
+// while still bounding tail-of-book exposure. The win cap is 100× for the
+// first 30 days post-launch: at $100 max stake + $720 per-horse-per-race
+// liability cap, a 100× bet means a single user can stake at most $7.20 on
+// a 100× horse, and the gross payout per race on that horse is bounded at
+// $720. Tightening the upper end is the cheapest way to limit damage from
+// any pricing edge a sophisticated bettor might discover during the launch
+// observation window. Re-evaluate with realised-RTP data after 30 days.
 const MIN_WIN_ODDS = 1.30;
-const MAX_WIN_ODDS = 200.00;
+const MAX_WIN_ODDS = 100.00;
 const MIN_PLACE_ODDS = 1.10;
 const MAX_PLACE_ODDS = 40.00;
 const MIN_SHOW_ODDS = 1.05;
@@ -88,22 +89,17 @@ export function calculateOddsMonteCarlo(
 
   const result = new Map<number, FullOdds>();
 
-  // Laplace smoothing per horse: (count + alpha) / (iterations + 2*alpha).
-  // Treat each horse as running a Bernoulli trial per race (won/didn't,
-  // placed/didn't, showed/didn't). Adding alpha=1 pseudo-observations of
-  // "win" and "loss" prevents zero-win horses from being priced at the cap.
-  //
-  // At 4000 iterations a horse with 0 wins gets probability 1/4002 ≈ 0.025%,
-  // pricing at ~345x (clamped to 100x cap). A horse with 1 win gets
-  // 2/4002 ≈ 0.05%, pricing at ~173x (still clamped). Only horses with
-  // more than ~5 wins in the sim break away from the cap.
-  const alpha = 1;
-  const denom = iterations + 2 * alpha;
-
+  // Probability = empirical win rate from the Monte Carlo, with a hard 0.5%
+  // floor so a horse that didn't win in any sim can still be priced under the
+  // MAX_WIN_ODDS cap. Cleaner than Laplace smoothing — the book overround
+  // (1.10) is the only multiplier between simulated probability and posted
+  // odds, which makes the math the same shape every other casino uses and
+  // makes "how are odds calculated?" answerable in one sentence.
+  const PROB_FLOOR = 0.005; // 0.5% — pairs cleanly with MAX_WIN_ODDS = 100
   for (const h of horses) {
-    const winProb = ((winCounts.get(h.id) || 0) + alpha) / denom;
-    const placeProb = ((placeCounts.get(h.id) || 0) + alpha) / denom;
-    const showProb = ((showCounts.get(h.id) || 0) + alpha) / denom;
+    const winProb = Math.max(PROB_FLOOR, (winCounts.get(h.id) || 0) / iterations);
+    const placeProb = Math.max(PROB_FLOOR, (placeCounts.get(h.id) || 0) / iterations);
+    const showProb = Math.max(PROB_FLOOR, (showCounts.get(h.id) || 0) / iterations);
 
     // Apply overround to each
     let winOdds = 1 / (winProb * OVERROUND);
