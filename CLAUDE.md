@@ -4,16 +4,16 @@
 
 ## What this is
 
-A crypto-native virtual horse racing betting platform. Users deposit USDC/SOL via Privy embedded wallets, bet on virtual horse races with fixed odds (16 persistent horses, 8 per race), and withdraw winnings. We are the house. ~9% house edge via 1.10 overround (category norm for virtual sports is 8–15%). 480 races/day (one every 3 minutes). Provably fair via HMAC-SHA256.
+A crypto-native virtual horse racing betting platform. Users deposit USDC/SOL via Privy embedded wallets, bet on virtual horse races with fixed odds (16 persistent horses, 8 per race), and withdraw winnings. We are the house. ~9% house edge via 1.10 overround (category norm for virtual sports is 8–15%). 480 races/day (one every 3 minutes). Provably fair via HMAC-SHA256. Odds priced strictly by `1 / (probability × overround)` — no clamps, no floors, no hierarchy patches.
 
-**House edge policy:** We don't headline the exact overround in marketing copy, but we don't hide it either — the simulation is deterministic and users can sum implied probabilities on `/api/race/state` or verify outcomes via `/verify`. If asked: "Yes, ~9% overround — industry-standard for virtual sports. We aim to lower it as bankroll and volume grow." Never deny it. Never raise it silently — if it changes, announce it.
+**House edge policy:** We don't headline the exact overround in marketing copy, but we don't hide it either — the simulation is deterministic and users can verify outcomes via `/verify`. If asked: "Yes, ~9% overround — industry-standard for virtual sports. We aim to lower it as bankroll and volume grow." Never deny it. Never raise it silently — if it changes, announce it. **Don't surface implied probabilities on the race card** — that's just spelling out the edge to the user.
 
 **Market positioning:** We are in the **virtual sports / virtual horse racing** category — NOT "AI horse racing". In all outbound copy (job posts, affiliate outreach, marketing, UI), lead with "virtual horse racing" or "virtual sports" — never "AI horse racing".
 
 **Domain:** throws.gg
 **Owner:** Connor — solo founder, vibe coder, uses Claude as the dev partner. Claude builds everything.
-**Launch target:** Early May 2026. Code is launch-ready as of 2026-04-27. Remaining steps are operational (top up hot wallet, cold wallet setup, flip live flag).
-**Bankroll:** $10K USD. Max bet $100. Max race liability 8% of bankroll per horse.
+**Launch target:** Early May 2026. Code is launch-ready as of 2026-04-30. Remaining steps are operational (top up hot wallet, cold wallet setup, flip live flag).
+**Bankroll:** $9K USD launch (`BANKROLL_RACING.INITIAL`). Max bet $100, min bet $0.10. Max race liability $750 per-horse-per-race (absolute, not ratio — replaced the 8% × bankroll ratio).
 
 ## Tech stack
 
@@ -24,7 +24,7 @@ A crypto-native virtual horse racing betting platform. Users deposit USDC/SOL vi
 - **State:** Zustand
 - **Styling:** Tailwind CSS v4 + shadcn/ui
 - **Animations:** Framer Motion + HTML Canvas (race animation)
-- **AI Commentary:** Anthropic Claude API (post-race summaries — `ANTHROPIC_API_KEY` empty, falls back gracefully)
+- **AI Commentary:** Anthropic Claude API (post-race summaries — shelved, code-path falls back gracefully)
 - **Analytics:** PostHog (client + server-side, PII scrubbed — wallet addresses hashed, balances bucketed)
 - **Email:** Resend (14 templates, transactional wiring live, webhook + unsubscribe)
 - **Anti-abuse:** FingerprintJS Pro (server-verified at signup)
@@ -78,6 +78,7 @@ rps/
       cron/                         # affiliate-tiers, affiliate-payouts, rakeback-nudge (weekly recap), weekly-leaderboard, streak-at-risk
       leaderboard, streak/          # Public leaderboard + streak status/top endpoints
       race/wins-feed                # Public live-wins ticker feed
+      stats/public                  # Anonymous lifetime wagered + races settled + biggest 30d payout (60s edge cache)
       webhooks/resend               # Email delivery events
       admin/                        # 14+ admin endpoints
   lib/
@@ -95,18 +96,22 @@ rps/
     chat/system-messages.ts
     analytics/                      # posthog (client + server, PII scrubbed)
   components/
-    racing/                         # RaceCanvas, HorseSprite, RaceWinCard, PodiumResults
+    racing/                         # RaceCanvas, HorseSprite, RaceWinCard, PodiumResults, HeroRaceCard, LiveWinsTicker
     bonus/                          # DailyBonusCard, RakebackCard, SignupBonusModal, WageringProgress
     chat/                           # ChatFeed, ChatTicker
     wallet/                         # DepositPanel (with delegation gate), WithdrawPanel
-    layout/                         # Navbar, MobileNav (5 tabs), Providers (PrivyAuthBridge)
+    layout/                         # Navbar, MobileNav (5 tabs: racing/form/leaders/events/profile), Providers (PrivyAuthBridge)
     ui/                             # shadcn-style primitives
     game/                           # RPS components (not launching)
   hooks/
     useChat, useAuthedFetch, useSound, useDepositMonitor, useGlobalBalancePoller
   middleware.ts                     # Geo-block (uses lib/geo/blocklist.ts)
   next.config.ts                    # Security headers (X-Frame-Options DENY, HSTS, CSP report-only)
-  supabase/migrations/              # 32 migrations applied to prod (latest: 032_add_is_affiliate)
+  supabase/migrations/              # 35 migrations applied to prod (latest: 035_daily_bet_streak)
+  scripts/
+    sim-fav-strategy.ts             # Replays last N settled races as if a user bet $100 on every favourite — read-only DB
+    sim-odds-engine.ts              # End-to-end synthetic-race smoke test for the odds engine (per-bucket realised RTP)
+    analyze-races.ts, simulate-odds.ts, bench.ts
   public/horses/                    # Sprite sheets (bodies, hair, face markings)
 ```
 
@@ -140,12 +145,13 @@ Key SQL functions: `update_balance()` (atomic), `place_race_bet_atomic()` (handl
 
 Driven by Vercel cron hitting `/api/race/tick` every minute. Tick checks timestamps and advances the state machine. Multiple ticks per cycle are safe (idempotent transitions).
 
-## What is DONE and shipped to prod (as of 2026-04-28)
+## What is DONE and shipped to prod (as of 2026-04-30)
 
 Core gameplay:
-- Race engine (create, close, simulate, settle), provably fair (HMAC-SHA256, deterministic), 16 horses with sprites, Monte Carlo odds (4000 iterations, 1.10 overround), atomic bet placement with bonus-aware accounting + per-horse liability cap, race animation with per-horse sprites + dust trails + winner glow, podium results screen.
-- Race card visual hierarchy (favourite/longshot chips, last-5 form pills, sprite ring on ground match, saddle-cloth gate numbers, odds tiered by size + colour, implied %).
-- Horse sprite crop fix — sprites no longer chopped at the legs.
+- Race engine (create, close, simulate, settle), provably fair (HMAC-SHA256, deterministic), 16 horses with sprites, Monte Carlo odds (25,000 iterations default, 1.10 overround), atomic bet placement with bonus-aware accounting + per-horse liability cap, race animation with per-horse sprites + dust trails + winner glow, podium results screen.
+- **Odds engine cleaned up (2026-04-29 → 04-30):** dropped Laplace prior + min/max odds clamps + hierarchy patches. Pricing is now exactly `decimal_odds = 1 / (empirical_probability × OVERROUND)` per horse. Only bound is `MAX_SUPPORTED_ODDS = MAX_RACE_LIABILITY / MIN_BET = 7,500×`, which is an operational cap (a longer payout is more than the bankroll can underwrite at min stake), not a pricing dial. `simulateRace` skips animation checkpoint generation when called from the Monte Carlo (`generateCheckpoints=false`), 10× pricing speedup. Per-priced-race cost ~300ms.
+- Race card visual hierarchy (favourite/longshot chips, last-5 form pills, saddle-cloth gate numbers, odds tiered by size + colour). **Removed implied-win-% line under the odds — that just spelled out the house edge to the user.**
+- **Race-card horse sprites all sit inside a circular frame** (white/14 hairline by default, silks-coloured ring when ground-match). Earlier inconsistency where only ground-match horses had a ring is fixed.
 - Race animation timing fix (server `race_starts_at` + client optimistic phase advance — no more "0 seconds" stalls).
 
 Wallet pipeline (the cashflow engine):
@@ -200,10 +206,25 @@ Legal pages:
 - /terms, /privacy, /responsible-gambling all live and linked from footer.
 
 Animations + UI:
-- Race card visual upgrade (favourite/longshot, form pills, ground-match dot, saddle-cloth gates, tiered odds, implied %).
+- Race card visual upgrade (favourite/longshot, form pills, ground-match dot, saddle-cloth gates, tiered odds). Implied % line removed.
 - Sprite render fix (legs no longer chopped — proper crop + aspect-preserved render).
 - Form guide pages (/horses index, /horse/[slug] detail) — fixed React error #31 (last_5_results was rendering as object, now projected to position numbers in the API).
 - Big win celebration overlay, share win card, podium results.
+
+Landing page (rebuilt 2026-04-29 → 04-30):
+- Editorial-trading-floor aesthetic. Geist (display, semibold) + JetBrains Mono (mono) + Outfit (body) via next/font. Section headers in confident sentence-case ("How a race runs", "Sixteen horses. Eight per race.", "Don't trust us. Verify the seed."), no more degen-meme register ("chaos pays / send it / get cooked" all gone). Hero lands on "A new race every three minutes. **Provably fair.**" — KYC framing demoted out of the hero (was reading like Stake/Rollbit affiliate copy).
+- `<HeroRaceCard />` widget polls `/api/race/state` and renders three states (betting / racing / results) with countdown anchored to absolute server timestamps (`bettingClosesAt`, `raceStartsAt`) so cache hits can never tick the timer up. Footer pill shows the truncated `serverSeedHash` labelled `commit` pre-race / `seed` post-settle, deep-linking to `/verify`.
+- `<LiveStatusBar />` above the hero with race # + countdown.
+- Trust strip with three category-level facts pre-launch ("Race cycle · Settlement · Race fairness"). Post-launch (when `/api/stats/public` reports ≥50 settled races) it switches to lifetime wagered / races settled / biggest 30d payout. **Bankroll size and per-horse liability cap are NEVER surfaced** — those leak operational data.
+- Form-guide rail: continuous left-scrolling marquee of all 16 horses with sprite cards, deep-linking to `/horse/[slug]`. 70s loop, pauses on hover.
+- Recent results rail with per-row "verify →" links to `/verify?race=N`.
+- 4-card "why" grid (provably fair / fixed odds / Solana-native / wallet-native).
+- New `/api/stats/public` endpoint: anonymous-readable lifetime wagered + races settled + biggest 30d payout, 60s edge cache.
+- Removed: fake `OddsTicker`, fake `LiveRacePreview` (both showed hardcoded data — instant trust kill on crypto Twitter), three blur-orbs hero background, scroll-down chevron.
+
+Mobile chrome:
+- Top header was squashing on mobile (balance + bonus + DEPOSIT + DE pill all jammed). Fix: bonus chip collapses to a gold dot, DEPOSIT button becomes "+" only, avatar pill drops chevron + padding. Full versions still render at `sm` breakpoint.
+- Bottom mobile nav reworked: `racing · form · leaders · events · profile`. Wallet + Refer dropped (one tap further away via the avatar dropdown). Events tab is greyed with a `soon` pill — placeholder for the future events surface.
 
 ## Current operational state (what's left for launch)
 
@@ -213,11 +234,16 @@ Animations + UI:
 3. **Flip `NEXT_PUBLIC_IS_LIVE=true` in Vercel** — switches landing page CTA from waitlist to "start betting → /racing".
 
 **Accepted not-doing:**
-- Anthropic API key for commentary (settle flow has try/catch fallback).
+- Anthropic API key for commentary (settle flow has try/catch fallback). Shelved indefinitely — Connor's call.
 - Profanity filter (Connor: "we're all adults here").
 - Age gate modal (security theatre without real ID verification — revisit at licence application).
 - Sentry error tracking (console only for MVP).
 - Sound design (Howler.js installed but no assets).
+
+**Risk analysis (as of 2026-04-30):**
+- Ran `scripts/sim-fav-strategy.ts` against last 1,000 settled races: a user betting $100 on the favourite every race for 1,000 races would lose $16,002 (16% realised edge), house bankroll would peak at $25K from $9K start, max house drawdown $383 (~4% of bankroll). Worst-strategy variance attack from a single user does not threaten the bankroll.
+- Ran `scripts/sim-odds-engine.ts` end-to-end (5,000 synthetic races × 10,000 MC iterations) against the cleaned odds engine: overall RTP 93.5%, realised edge 6.5% (target 9.09%, gap is favourite-longshot bias of horse racing). No buckets show >100% RTP at the now-uncapped longshot tail. Engine is correctly priced to within Monte-Carlo sampling resolution.
+- Real launch-window risks ranked: (1) sim-pricing exploit on a specific distance/ground/horse combo, (2) operational events (hot-wallet breach, signing-key leak, RPC outage), (3) the per-horse liability cap is hardcoded against `BANKROLL_RACING.INITIAL` not current bankroll — drawdowns don't shrink the cap. Item (3) is a known follow-up.
 
 **Post-launch nice-to-haves:**
 - Horse following + per-horse notifications ("Thunderbolt is racing in 5 min").
@@ -354,3 +380,5 @@ ADMIN_SESSION_SALT                   # ≥32 chars (also used to sign unsubscrib
 - **2026-04-26:** Verifying-authorization UX (silent polling instead of scary 409 during Privy consistency window).
 - **2026-04-27:** /referrals 404 fix (migration 032), /horses React #31 fix, /profile VIP rewrite (unified with rakeback ladder), privacy policy page, frictionless bet sizing (cash+bonus reactive subscription, auto-cap on submit, split surfaced in stake summary).
 - **2026-04-28:** Tier 0 retention/engagement shipped across 4 commits. Migrations 033/034/035. Instant rakeback (no claim button, cash-portion only, +$X toast on settle). Tipster leaderboard ROI-ranked with 4 windows, top-3 chat flame badges. Daily bet streak (UTC-day, profile card, chat handle). Live wins ticker (real data, replaces orphan). Photo-finish near-miss framing on losing bets. Inline "Verify this race" CTA + deep-link auto-run. Three new crons (rakeback weekly recap repurposed, weekly leaderboard email, streak-at-risk daily 20:00 UTC).
+- **2026-04-29:** Landing page rebuilt around real live race data. Deleted fake `OddsTicker` + `LiveRacePreview`, added `<HeroRaceCard />` driven by `/api/race/state`, swapped Fraunces light-italic display face for Geist semibold (better fit for crypto-native audience), restructured into 7 sections (live status bar, hero, trust strip, race-cycle timeline, form-guide marquee, recent results rail with per-row verify links, 4-card "why" grid, expanded footer). Fixed countdown drift by anchoring to absolute server deadlines instead of relative timeRemaining. Added `/api/stats/public` for trust-strip counters. Race-card sprite borders made consistent across all horses; mobile header de-squashed; bottom nav reworked to racing · form · leaders · events · profile.
+- **2026-04-30:** Odds engine cleanup. Stripped Laplace prior + min/max odds clamps + win/place/show hierarchy patches. Pricing collapsed to one line: `1 / (probability × overround)`. Bumped default MC iterations from 4000 → 25,000 to nail down longshot tail resolution. Added `simulateRace(generateCheckpoints=false)` path so the Monte Carlo skips ~640k unused HMACs per priced race (~10× pricing speedup). Two analysis scripts shipped: `sim-fav-strategy.ts` (replays last N races against a max-stake-on-favourite user, no DB writes) and `sim-odds-engine.ts` (end-to-end synthetic-race smoke test, reports realised RTP per odds bucket). Removed implied-win-% line from the race card (was spelling out the house edge). Lowered `MAX_RACE_LIABILITY` from $720 (8% of bankroll ratio) to $750 absolute.
