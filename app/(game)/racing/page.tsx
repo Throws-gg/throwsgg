@@ -530,14 +530,17 @@ export default function RacingPage() {
                   </span>
                 </div>
 
-                {/* Horse sprite — bumped to 56px, with a subtle silks ring when
-                    the horse prefers today's ground. */}
+                {/* Horse sprite — every horse sits inside a circular frame so
+                    the row reads cleanly regardless of sprite contrast against
+                    the dark background. Ground-match horses get a stronger
+                    silks-coloured ring; the rest get a neutral hairline. */}
                 <div
-                  className={cn(
-                    "shrink-0 rounded-full p-[2px]",
-                    groundMatch ? "ring-1" : ""
-                  )}
-                  style={groundMatch ? { boxShadow: `inset 0 0 0 1.5px ${h.color}55` } : undefined}
+                  className="shrink-0 rounded-full p-[2px] flex items-center justify-center bg-white/[0.025]"
+                  style={{
+                    boxShadow: groundMatch
+                      ? `inset 0 0 0 1.5px ${h.color}aa, 0 0 14px ${h.color}30`
+                      : `inset 0 0 0 1px rgba(255,255,255,0.14)`,
+                  }}
                 >
                   <HorseSprite slug={entry.horse.slug} size={56} />
                 </div>

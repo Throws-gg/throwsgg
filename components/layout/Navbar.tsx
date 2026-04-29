@@ -50,7 +50,7 @@ function BalanceDisplay() {
   return (
     <Link
       href="/wallet"
-      className="flex items-center gap-2 rounded-lg px-3 py-1.5
+      className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 sm:px-3
         bg-gradient-to-r from-violet/10 to-magenta/10
         border border-violet/25
         shadow-[0_0_12px_rgba(139,92,246,0.12)]
@@ -59,10 +59,12 @@ function BalanceDisplay() {
       <span className="text-green font-mono font-black text-sm tabular-nums">
         ${balance.toFixed(2)}
       </span>
+      {/* Bonus chip is hidden on mobile to keep the header from squashing.
+          Still surfaced in the avatar dropdown stat strip. */}
       {hasBonus && (
         <>
-          <span className="w-px h-3 bg-white/10" />
-          <span className="flex items-center gap-1">
+          <span className="hidden sm:block w-px h-3 bg-white/10" />
+          <span className="hidden sm:flex items-center gap-1">
             <span className="text-[8px] font-black uppercase text-gold/80 tracking-widest">
               Bonus
             </span>
@@ -70,6 +72,12 @@ function BalanceDisplay() {
               ${bonusBalance.toFixed(2)}
             </span>
           </span>
+          {/* Mobile-only bonus dot — signals "you have bonus" without the chip. */}
+          <span
+            className="sm:hidden w-1.5 h-1.5 rounded-full bg-gold shadow-[0_0_6px_rgba(245,158,11,0.6)]"
+            title={`Bonus: $${bonusBalance.toFixed(2)}`}
+            aria-label={`Bonus balance $${bonusBalance.toFixed(2)}`}
+          />
         </>
       )}
     </Link>
@@ -104,8 +112,9 @@ function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        aria-label="Open account menu"
         className="group/trigger relative flex items-center gap-2 rounded-full
-          pl-1 pr-2.5 py-1
+          p-0.5 sm:pl-1 sm:pr-2.5 sm:py-1
           bg-gradient-to-r from-violet/20 via-violet/10 to-magenta/15
           border border-violet/40
           shadow-[0_0_0_1px_rgba(139,92,246,0.15),0_4px_20px_-4px_rgba(139,92,246,0.35)]
@@ -139,7 +148,7 @@ function UserMenu() {
           {displayName}
         </span>
         <ChevronDown
-          className="h-3.5 w-3.5 text-foreground/60
+          className="hidden sm:block h-3.5 w-3.5 text-foreground/60
             transition-transform duration-200
             group-data-[popup-open]/trigger:rotate-180
             group-hover/trigger:text-magenta"
@@ -314,19 +323,20 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md">
-      <div className="flex h-14 items-center justify-between px-4 max-w-screen-2xl mx-auto">
+      <div className="flex h-14 items-center justify-between gap-2 px-3 sm:px-4 max-w-screen-2xl mx-auto">
         <Logo />
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <BalanceDisplay />
           {userId && (
-            <Link href="/wallet">
+            <Link href="/wallet" aria-label="Deposit">
               <Button
                 size="sm"
-                className="bg-green text-black font-black text-xs px-3
+                className="bg-green text-black font-black text-xs px-2.5 sm:px-3
                   hover:bg-green/90 active:scale-95
                   animate-deposit-glow"
               >
-                + DEPOSIT
+                <span className="sm:hidden text-base leading-none">+</span>
+                <span className="hidden sm:inline">+ DEPOSIT</span>
               </Button>
             </Link>
           )}
