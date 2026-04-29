@@ -123,8 +123,8 @@ function TrustStrip() {
       <section className="py-12 sm:py-16 px-4 border-y border-white/[0.04]">
         <div className="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-px bg-white/[0.04] rounded-2xl overflow-hidden">
           {[
-            { k: "Bankroll backing every race", v: "$10,000" },
-            { k: "Max payout per horse, per race", v: "8% of bankroll" },
+            { k: "Race cycle", v: "Every 3 min" },
+            { k: "Settlement", v: "On-chain, instant" },
             { k: "Race fairness", v: "HMAC-SHA256" },
           ].map((f) => (
             <div key={f.k} className="bg-[#08080D] px-6 py-7 flex flex-col gap-2">
