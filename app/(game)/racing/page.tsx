@@ -67,6 +67,23 @@ const HORSE_SPRITES = ["🐎", "🏇", "🐴", "🐎", "🏇", "🐴", "🐎", "
 
 // Session-level bet counter (survives across component re-renders but resets on page reload)
 let sessionBetCount = 0;
+const MIN_RACE_BET = BANKROLL_RACING.MIN_BET;
+
+function floorCents(n: number): number {
+  return Math.floor(Math.max(0, n) * 100) / 100;
+}
+
+function formatStake(n: number): string {
+  return n < 1 || !Number.isInteger(n) ? n.toFixed(2) : n.toFixed(0);
+}
+
+function stakeChipsForOdds(odds: number): number[] {
+  if (odds >= 250) return [0.10, 0.25, 0.50];
+  if (odds >= 100) return [0.25, 0.50, 1];
+  if (odds >= 30) return [0.50, 1, 2];
+  if (odds >= 10) return [1, 2, 5];
+  return [1, 5, 10];
+}
 
 // ======= MAIN PAGE =======
 
@@ -394,6 +411,9 @@ export default function RacingPage() {
     if (isResults) return (a.finishPosition || 99) - (b.finishPosition || 99);
     return a.currentOdds - b.currentOdds;
   });
+  const selectedRaceEntry = selectedHorse
+    ? currentRace.entries.find((entry) => entry.id === selectedHorse.id) || selectedHorse
+    : null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -864,9 +884,9 @@ export default function RacingPage() {
 
       {/* Horse detail / bet card (glassmorphic) */}
       <AnimatePresence>
-        {selectedHorse && isBetting && (
+        {selectedRaceEntry && isBetting && (
           <HorseBetCard
-            entry={selectedHorse}
+            entry={selectedRaceEntry}
             raceId={currentRace.id}
             userId={userId}
             balance={balance}
@@ -945,11 +965,22 @@ function HorseBetCard({
   const [betType, setBetType] = useState<"win" | "place" | "show">("win");
   const [placing, setPlacing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [maxLiabilityBet, setMaxLiabilityBet] = useState<number | null>(null);
-  const CHIPS = [0.10, 0.50, 1, 5, 10];
+  const [liabilityRemainingOverride, setLiabilityRemainingOverride] = useState<number | null>(null);
 
   const activeOdds = betType === "place" ? entry.placeOdds : betType === "show" ? entry.showOdds : entry.currentOdds;
+  const totalFunds = balance + bonusBalance;
+  const knownRemainingLiability = liabilityRemainingOverride ?? entry.liabilityRemaining ?? null;
+  const liabilityStakeCap = knownRemainingLiability !== null
+    ? floorCents(knownRemainingLiability / activeOdds)
+    : null;
+  const baseStakeCap = Math.min(totalFunds, BANKROLL_RACING.MAX_BET);
+  const maxAllowed = floorCents(Math.min(
+    baseStakeCap,
+    liabilityStakeCap ?? Number.POSITIVE_INFINITY
+  ));
   const potentialPayout = betAmount * activeOdds;
+  const chips = stakeChipsForOdds(activeOdds);
+  const isLiabilityLimited = liabilityStakeCap !== null && liabilityStakeCap < baseStakeCap;
 
   const h = entry.horse;
   const winRate = h.careerRaces > 0 ? ((h.careerWins / h.careerRaces) * 100).toFixed(0) : "—";
@@ -960,24 +991,28 @@ function HorseBetCard({
   const groundAdjacent = ["firm", "good", "soft", "heavy"];
   const groundSteps = Math.abs(groundAdjacent.indexOf(h.groundPreference) - groundAdjacent.indexOf(raceGround));
 
+  useEffect(() => {
+    setLiabilityRemainingOverride(null);
+  }, [entry.id]);
+
+  useEffect(() => {
+    setBetAmount((prev) => prev > maxAllowed ? maxAllowed : prev);
+  }, [maxAllowed]);
+
   const handlePlaceBet = async () => {
-    if (!userId || betAmount < 0.1) return;
+    if (!userId || betAmount < MIN_RACE_BET) return;
 
     // Auto-cap to whatever the user can actually afford (cash + bonus combined)
     // and to the per-horse liability cap if known. Frictionless: clicking
     // "Bet $5" with $1 cash + $0 bonus quietly places a $1 bet rather than
     // erroring out and asking the user to fix it.
-    const totalFunds = balance + bonusBalance;
-    const cap = Math.min(
-      betAmount,
-      totalFunds,
-      BANKROLL_RACING.MAX_BET,
-      ...(maxLiabilityBet !== null ? [maxLiabilityBet] : []),
-    );
-    const stake = Math.floor(cap * 100) / 100; // round DOWN to cents — never bet a fraction we can't cover
-    if (stake < 0.1) {
+    const stake = floorCents(Math.min(betAmount, maxAllowed)); // round DOWN to cents — never bet a fraction we can't cover
+    if (stake < MIN_RACE_BET) {
       // Truly nothing to bet with — surface this as a guard rather than silently failing.
-      setResult({ success: false, message: "Add funds to place a bet" });
+      setResult({
+        success: false,
+        message: isLiabilityLimited ? "This horse has reached its betting limit" : "Add funds to place a bet",
+      });
       return;
     }
 
@@ -990,12 +1025,16 @@ function HorseBetCard({
       const data = await res.json();
       if (!res.ok) {
         // If liability limit hit, auto-cap to max allowed
-        if (data.maxBet !== undefined) {
-          const cap = Math.round(data.maxBet * 100) / 100;
-          setMaxLiabilityBet(cap);
-          if (cap > 0) {
+        if (data.maxBet !== undefined || data.remainingLiability !== undefined) {
+          const lockedOdds = Number(data.lockedOdds || activeOdds);
+          const remaining = typeof data.remainingLiability === "number"
+            ? data.remainingLiability
+            : Number(data.maxBet || 0) * lockedOdds;
+          const cap = floorCents(typeof data.maxBet === "number" ? data.maxBet : remaining / lockedOdds);
+          setLiabilityRemainingOverride(floorCents(remaining));
+          if (cap >= MIN_RACE_BET) {
             setBetAmount(cap);
-            setResult({ success: false, message: `Max bet on this horse: $${cap.toFixed(2)}` });
+            setResult({ success: false, message: `Only $${cap.toFixed(2)} left at ${lockedOdds.toFixed(2)}x` });
           } else {
             setResult({ success: false, message: "This horse has reached its betting limit" });
           }
@@ -1047,7 +1086,7 @@ function HorseBetCard({
           bonus_balance_after: data.bonusBalance || 0,
           session_bet_number: sessionBetCount,
         });
-        setResult({ success: true, message: `Bet placed! Potential win: $${potentialPayout.toFixed(2)}` });
+        setResult({ success: true, message: `Bet placed! Potential win: $${Number(data.bet.potentialPayout).toFixed(2)}` });
         setTimeout(() => { onClose(); setResult(null); }, 1500);
       }
     } catch { setResult({ success: false, message: "Failed to place bet" }); }
@@ -1089,7 +1128,7 @@ function HorseBetCard({
           ]).map((t) => (
             <button
               key={t.type}
-              onClick={() => setBetType(t.type)}
+              onClick={() => { setBetType(t.type); setResult(null); }}
               className={cn(
                 "flex-1 py-2 rounded-md text-center transition-all",
                 betType === t.type
@@ -1237,34 +1276,65 @@ function HorseBetCard({
         {/* Bet controls */}
         {userId ? (
           <>
-            <div className="flex gap-1.5">
-              {CHIPS.map((chip) => {
-                const totalFunds = balance + bonusBalance;
-                const maxAllowed = Math.min(
-                  BANKROLL_RACING.MAX_BET,
-                  totalFunds,
-                  ...(maxLiabilityBet !== null ? [maxLiabilityBet] : [])
-                );
-                const atMax = betAmount >= maxAllowed;
+            <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3 grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-white/35 text-[10px]">Odds</p>
+                <p className="text-white font-bold font-mono">{activeOdds.toFixed(2)}x</p>
+              </div>
+              <div>
+                <p className="text-white/35 text-[10px]">$1 pays</p>
+                <p className="text-green font-bold font-mono">${activeOdds.toFixed(2)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-white/35 text-[10px]">Max stake</p>
+                <p className={cn("font-bold font-mono", maxAllowed >= MIN_RACE_BET ? "text-white" : "text-red/70")}>
+                  {maxAllowed >= MIN_RACE_BET ? `$${maxAllowed.toFixed(2)}` : "$0.00"}
+                </p>
+              </div>
+              {isLiabilityLimited && (
+                <p className="col-span-3 text-[10px] text-gold/70 border-t border-white/[0.04] pt-2 font-mono tabular-nums">
+                  Only ${maxAllowed.toFixed(2)} left at {activeOdds.toFixed(2)}x
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-4 gap-1.5">
+              {chips.map((chip) => {
+                const remainingStake = floorCents(maxAllowed - betAmount);
+                const addAmount = floorCents(Math.min(chip, remainingStake));
+                const atMax = maxAllowed < MIN_RACE_BET || remainingStake <= 0;
                 return (
                   <button key={chip}
                     onClick={() => setBetAmount((prev) => {
-                      const next = prev + chip;
-                      return Math.round(Math.min(next, maxAllowed) * 100) / 100;
+                      const next = prev + addAmount;
+                      setResult(null);
+                      return floorCents(Math.min(next, maxAllowed));
                     })}
-                    disabled={totalFunds < 0.10 || atMax}
-                    className={cn("flex-1 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95",
+                    disabled={atMax}
+                    className={cn("min-h-[46px] py-2 rounded-xl text-xs font-bold border transition-all active:scale-95 flex flex-col items-center justify-center",
                       "bg-white/[0.04] border-white/[0.08] text-white/70 hover:bg-white/[0.06]",
-                      (totalFunds < 0.10 || atMax) && "opacity-25")}>
-                    +${chip < 1 ? chip.toFixed(2) : chip}
+                      atMax && "opacity-25")}>
+                    <span>+${formatStake(addAmount)}</span>
+                    <span className="text-[9px] text-white/30 font-mono">${(addAmount * activeOdds).toFixed(2)}</span>
                   </button>
                 );
               })}
-              {betAmount > 0 && (
-                <button onClick={() => setBetAmount(0)}
-                  className="px-3 py-2 rounded-xl text-[10px] font-bold text-red bg-red/10 border border-red/20">CLR</button>
-              )}
+              <button
+                onClick={() => { setBetAmount(maxAllowed); setResult(null); }}
+                disabled={maxAllowed < MIN_RACE_BET}
+                className={cn("min-h-[46px] py-2 rounded-xl text-xs font-bold border transition-all active:scale-95 flex flex-col items-center justify-center",
+                  "bg-violet/[0.10] border-violet/20 text-violet/90 hover:bg-violet/[0.14]",
+                  maxAllowed < MIN_RACE_BET && "opacity-25")}
+              >
+                <span>MAX</span>
+                <span className="text-[9px] text-white/35 font-mono">${maxAllowed.toFixed(2)}</span>
+              </button>
             </div>
+
+            {betAmount > 0 && (
+              <button onClick={() => { setBetAmount(0); setResult(null); }}
+                className="w-full py-2 rounded-xl text-[10px] font-bold text-red bg-red/10 border border-red/20">CLEAR STAKE</button>
+            )}
 
             {betAmount > 0 && (() => {
               // Mirror the server's "spend cash first, then bonus" allocation
@@ -1298,12 +1368,18 @@ function HorseBetCard({
               );
             })()}
 
-            <button onClick={handlePlaceBet} disabled={betAmount < 0.1 || placing}
+            <button onClick={handlePlaceBet} disabled={betAmount < MIN_RACE_BET || maxAllowed < MIN_RACE_BET || placing}
               className={cn("w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-[0.99]",
-                betAmount >= 0.1
+                betAmount >= MIN_RACE_BET && maxAllowed >= MIN_RACE_BET
                   ? "bg-gradient-to-r from-violet to-magenta text-white shadow-[0_4px_20px_rgba(139,92,246,0.25)]"
                   : "bg-white/[0.04] text-white/40")}>
-              {placing ? "Placing..." : betAmount < 0.1 ? "Select amount" : `Bet $${betAmount.toFixed(2)} on ${h.name}`}
+              {placing
+                ? "Placing..."
+                : maxAllowed < MIN_RACE_BET
+                  ? isLiabilityLimited ? "Limit reached" : "Add funds"
+                  : betAmount < MIN_RACE_BET
+                    ? "Select amount"
+                    : `Place $${betAmount.toFixed(2)} ${betType} bet`}
             </button>
 
             {result && (

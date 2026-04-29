@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid bet amount" }, { status: 400 });
     }
 
-    if (amount < 0.10) {
-      return NextResponse.json({ error: "Minimum bet is $0.10" }, { status: 400 });
+    if (amount < BANKROLL_RACING.MIN_BET) {
+      return NextResponse.json({ error: `Minimum bet is $${BANKROLL_RACING.MIN_BET.toFixed(2)}` }, { status: 400 });
     }
 
     if (amount > BANKROLL_RACING.MAX_BET) {
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     // Per-horse liability cap is enforced atomically inside place_race_bet_atomic
     // under a row lock on race_entries. Passing the cap in keeps the config in TS.
-    const maxLiability = BANKROLL_RACING.INITIAL * BANKROLL_RACING.MAX_RACE_LIABILITY_RATIO;
+    const maxLiability = BANKROLL_RACING.MAX_RACE_LIABILITY;
 
     // Atomic bet placement with bonus-aware balance handling + liability cap.
     // Returns: { bet_id, cash_balance, bonus_balance, wagering_remaining,
@@ -109,7 +109,13 @@ export async function POST(request: NextRequest) {
         const remaining = Math.max(0, cap - current);
         const maxBetForLiability = Math.floor((remaining / lockedOdds) * 100) / 100;
         return NextResponse.json(
-          { error: "Liability limit reached for this horse", maxBet: maxBetForLiability },
+          {
+            error: "Liability limit reached for this horse",
+            maxBet: maxBetForLiability,
+            remainingLiability: remaining,
+            maxLiability: cap,
+            lockedOdds,
+          },
           { status: 400 }
         );
       }

@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentRace, tick } from "@/lib/racing/engine";
 import { simulateRace } from "@/lib/racing/simulation";
-import { RACE_TIMING } from "@/lib/racing/constants";
+import { BANKROLL_RACING, RACE_TIMING } from "@/lib/racing/constants";
 import type { RacePhase, RaceState, GroundCondition, RaceDistance } from "@/lib/racing/constants";
 
 // In-memory cache — avoids hitting Supabase on every 2s poll
 let cachedState: { data: unknown; raceId: string; status: string; timestamp: number } | null = null;
 const CACHE_TTL = 1500; // 1.5 seconds
+const roundCents = (n: number) => Math.round(n * 100) / 100;
 
 export async function GET() {
   const supabase = createAdminClient();
@@ -79,6 +80,23 @@ export async function GET() {
       .select("*, horses(*)")
       .eq("race_id", current.id)
       .order("gate_position", { ascending: true });
+
+    const maxRaceLiability = BANKROLL_RACING.MAX_RACE_LIABILITY;
+    const liabilityByHorse = new Map<number, number>();
+    if (current.status === "betting") {
+      const { data: pendingBets } = await supabase
+        .from("race_bets")
+        .select("horse_id, potential_payout")
+        .eq("race_id", current.id)
+        .eq("status", "pending");
+
+      for (const bet of pendingBets || []) {
+        const horseId = Number(bet.horse_id);
+        const payout = Number(bet.potential_payout);
+        if (!Number.isFinite(horseId) || !Number.isFinite(payout)) continue;
+        liabilityByHorse.set(horseId, (liabilityByHorse.get(horseId) || 0) + payout);
+      }
+    }
 
     // Get last settled race
     let lastRaceData = null;
@@ -160,6 +178,8 @@ export async function GET() {
     // Format entries
     const formattedEntries = (entries || []).map((e) => {
       const h = e.horses as unknown as Record<string, unknown>;
+      const liabilityUsed = liabilityByHorse.get(e.horse_id) || 0;
+      const liabilityRemaining = Math.max(0, maxRaceLiability - liabilityUsed);
       return {
         id: e.id,
         horseId: e.horse_id,
@@ -189,6 +209,9 @@ export async function GET() {
         currentOdds: parseFloat(e.current_odds),
         placeOdds: e.place_odds ? parseFloat(e.place_odds) : parseFloat(e.current_odds) * 0.5,
         showOdds: e.show_odds ? parseFloat(e.show_odds) : parseFloat(e.current_odds) * 0.3,
+        liabilityUsed: current.status === "betting" ? roundCents(liabilityUsed) : undefined,
+        liabilityRemaining: current.status === "betting" ? roundCents(liabilityRemaining) : undefined,
+        maxLiability: current.status === "betting" ? maxRaceLiability : undefined,
         trueProbability: exposeHiddenFields ? parseFloat(e.true_probability) : undefined,
         powerScore: exposeHiddenFields && e.power_score ? parseFloat(e.power_score) : undefined,
         finishPosition: e.finish_position || undefined,

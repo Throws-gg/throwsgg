@@ -21,9 +21,11 @@ export const TOTAL_HORSES = 16;
 
 export const BANKROLL_RACING = {
   INITIAL: 9_000,                   // ~$14K AUD launch bankroll in USD
+  MIN_BET: 0.10,                    // Smallest supported stake
   MAX_BET: 100,                     // Hard cap $100 per bet
   MAX_BET_RATIO: 0.01,             // 1% of bankroll
-  MAX_RACE_LIABILITY_RATIO: 0.08,  // 8% of bankroll per horse per race ($720 max payout)
+  MAX_RACE_LIABILITY: 750,          // Max gross payout exposure per horse per race, across all bettors
+  MAX_RACE_LIABILITY_RATIO: 0.08,  // Legacy reference: 8% of bankroll per horse per race
   // Odds caps + overround source of truth live in lib/racing/odds-engine.ts
 } as const;
 
@@ -61,6 +63,9 @@ export interface RaceEntry {
   currentOdds: number;
   placeOdds: number;
   showOdds: number;
+  liabilityUsed?: number;
+  liabilityRemaining?: number;
+  maxLiability?: number;
   // trueProbability + powerScore are ONLY set on the server during settled
   // races (post-reveal). They are stripped from the wire during betting/closed/racing
   // to prevent a bettor from scanning for positive-EV horses before results exist.

@@ -69,7 +69,12 @@ export function simulateRace(
   nonce: number,
   horses: HorseStats[],
   distance: RaceDistance,
-  ground: GroundCondition
+  ground: GroundCondition,
+  // When only finish order is needed (Monte Carlo for odds pricing), skip
+  // animation checkpoint generation. Each checkpoint costs an HMAC, and at
+  // 20 checkpoints × 8 horses × 4,000 MC iterations that's ~640k extra HMACs
+  // per priced race that get discarded. Pricing-only callers should pass false.
+  generateCheckpoints: boolean = true,
 ): SimulationResult {
   const scores: { horseId: number; powerScore: number }[] = [];
 
@@ -140,6 +145,11 @@ export function simulateRace(
     powerScore: Math.round(s.powerScore * 100) / 100,
     margin: i === 0 ? 0 : Math.round((winnerScore - s.powerScore) * 0.3 * 100) / 100,
   }));
+
+  // Pricing-only path skips checkpoints — same finish order, ~99% less compute.
+  if (!generateCheckpoints) {
+    return { finishOrder, checkpoints: [] };
+  }
 
   // Generate animation checkpoints (20 points for smoother animation)
   // Each horse has a progress curve from 0 to ~100 showing position changes

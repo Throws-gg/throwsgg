@@ -13,10 +13,12 @@ interface HorseForOdds {
 }
 
 export interface FullOdds {
-  probability: number;    // True win probability
-  winOdds: number;        // Decimal odds for win
-  placeOdds: number;      // Decimal odds for place (top 2)
-  showOdds: number;       // Decimal odds for show (top 3)
+  probability: number;       // True win probability
+  placeProbability: number;  // True place probability (top 2)
+  showProbability: number;   // True show probability (top 3)
+  winOdds: number;           // Decimal odds for win
+  placeOdds: number;         // Decimal odds for place (top 2)
+  showOdds: number;          // Decimal odds for show (top 3)
 }
 
 export const OVERROUND = 1.10;  // 110% — ~9.09% house edge
@@ -29,32 +31,42 @@ export const OVERROUND = 1.10;  // 110% — ~9.09% house edge
 // we don't hide the overround, we just don't headline it. Aim is to
 // lower this over time as bankroll + handle grow.
 export const HOUSE_EDGE = (OVERROUND - 1) / OVERROUND;
-// Odds caps — kept wide enough that the book percentage lands near OVERROUND
-// while still bounding tail-of-book exposure. The win cap is 100× for the
-// first 30 days post-launch: at $100 max stake + $720 per-horse-per-race
-// liability cap, a 100× bet means a single user can stake at most $7.20 on
-// a 100× horse, and the gross payout per race on that horse is bounded at
-// $720. Tightening the upper end is the cheapest way to limit damage from
-// any pricing edge a sophisticated bettor might discover during the launch
-// observation window. Re-evaluate with realised-RTP data after 30 days.
-const MIN_WIN_ODDS = 1.30;
-const MAX_WIN_ODDS = 100.00;
-const MIN_PLACE_ODDS = 1.10;
-const MAX_PLACE_ODDS = 40.00;
-const MIN_SHOW_ODDS = 1.05;
-const MAX_SHOW_ODDS = 18.00;
+export const MAX_SUPPORTED_ODDS = BANKROLL_RACING.MAX_RACE_LIABILITY / BANKROLL_RACING.MIN_BET;
+
+export const ODDS_LIMITS = {
+  WIN_MIN: 1.01,
+  WIN_MAX: MAX_SUPPORTED_ODDS,
+  PLACE_MIN: 1.01,
+  PLACE_MAX: MAX_SUPPORTED_ODDS,
+  SHOW_MIN: 1.01,
+  SHOW_MAX: MAX_SUPPORTED_ODDS,
+} as const;
 
 /**
- * Monte Carlo odds — runs the simulation 1500 times to estimate
- * win, place (top 2), and show (top 3) probabilities for each horse.
- * Applies overround to all three bet types.
+ * Monte Carlo odds — runs the simulation N times to estimate win, place
+ * (top 2), and show (top 3) probabilities for each horse.
+ *
+ * Pricing is deliberately per horse:
+ *   decimal_odds = 1 / (empirical_probability * overround)
+ *
+ * The wide max caps are not the source of edge; they only bound impossible
+ * tail prices for launch-bankroll liability. Any horse below the cap gets the
+ * same target margin as every other horse.
+ *
+ * Iterations: 25,000 is enough to nail down rare-event probabilities at
+ * the longshot tail. With fewer iterations a horse that truly wins ~1%
+ * of the time gets a measured probability that swings widely from
+ * sampling noise, which translates to ~10× swings in the priced odds
+ * for the same horse. 25k cuts that sampling SD to ~0.06pp and the
+ * longshot tail prices honestly. Per-race compute is <300ms — fine for
+ * the once-per-3-min pricing cadence.
  */
 export function calculateOddsMonteCarlo(
   horses: HorseForOdds[],
   distance: RaceDistance,
   ground: GroundCondition,
   baseSeed: string = "odds-calc",
-  iterations: number = 4000
+  iterations: number = 25_000
 ): Map<number, FullOdds> {
   const winCounts = new Map<number, number>();
   const placeCounts = new Map<number, number>();  // Top 2
@@ -71,7 +83,8 @@ export function calculateOddsMonteCarlo(
       .update(`mc-odds:${i}`)
       .digest("hex");
 
-    const result = simulateRace(iterSeed, "throws.gg", i, horses, distance, ground);
+    // Pricing only needs finish order — skip the 20×8 checkpoint HMACs.
+    const result = simulateRace(iterSeed, "throws.gg", i, horses, distance, ground, false);
 
     // Count win, place, show for each horse
     for (const finish of result.finishOrder) {
@@ -89,36 +102,36 @@ export function calculateOddsMonteCarlo(
 
   const result = new Map<number, FullOdds>();
 
-  // Probability = empirical win rate from the Monte Carlo, with a hard 0.5%
-  // floor so a horse that didn't win in any sim can still be priced under the
-  // MAX_WIN_ODDS cap. Cleaner than Laplace smoothing — the book overround
-  // (1.10) is the only multiplier between simulated probability and posted
-  // odds, which makes the math the same shape every other casino uses and
-  // makes "how are odds calculated?" answerable in one sentence.
-  const PROB_FLOOR = 0.005; // 0.5% — pairs cleanly with MAX_WIN_ODDS = 100
+  const EPS = 1 / (iterations * 4); // = 0.001% at 25k iters
+
   for (const h of horses) {
-    const winProb = Math.max(PROB_FLOOR, (winCounts.get(h.id) || 0) / iterations);
-    const placeProb = Math.max(PROB_FLOOR, (placeCounts.get(h.id) || 0) / iterations);
-    const showProb = Math.max(PROB_FLOOR, (showCounts.get(h.id) || 0) / iterations);
+    const winProb = Math.max(EPS, (winCounts.get(h.id) || 0) / iterations);
+    const placeProb = Math.max(EPS, (placeCounts.get(h.id) || 0) / iterations);
+    const showProb = Math.max(EPS, (showCounts.get(h.id) || 0) / iterations);
 
-    // Apply overround to each
-    let winOdds = 1 / (winProb * OVERROUND);
-    let placeOdds = 1 / (placeProb * OVERROUND);
-    let showOdds = 1 / (showProb * OVERROUND);
-
-    // Clamp
-    winOdds = Math.max(MIN_WIN_ODDS, Math.min(MAX_WIN_ODDS, Math.round(winOdds * 100) / 100));
-    placeOdds = Math.max(MIN_PLACE_ODDS, Math.min(MAX_PLACE_ODDS, Math.round(placeOdds * 100) / 100));
-    showOdds = Math.max(MIN_SHOW_ODDS, Math.min(MAX_SHOW_ODDS, Math.round(showOdds * 100) / 100));
-
-    // Ensure odds hierarchy: win > place > show
-    if (placeOdds >= winOdds) placeOdds = Math.round((winOdds * 0.55) * 100) / 100;
-    if (showOdds >= placeOdds) showOdds = Math.round((placeOdds * 0.65) * 100) / 100;
-
-    result.set(h.id, { probability: winProb, winOdds, placeOdds, showOdds });
+    result.set(h.id, {
+      probability: winProb,
+      placeProbability: placeProb,
+      showProbability: showProb,
+      winOdds: priceProbability(winProb, ODDS_LIMITS.WIN_MIN, ODDS_LIMITS.WIN_MAX),
+      placeOdds: priceProbability(placeProb, ODDS_LIMITS.PLACE_MIN, ODDS_LIMITS.PLACE_MAX),
+      showOdds: priceProbability(showProb, ODDS_LIMITS.SHOW_MIN, ODDS_LIMITS.SHOW_MAX),
+    });
   }
 
   return result;
+}
+
+function priceProbability(probability: number, minOdds: number, maxOdds: number): number {
+  return round2(clamp(1 / (probability * OVERROUND), minOdds, maxOdds));
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(Math.max(n, min), max);
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 /**
