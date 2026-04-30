@@ -257,7 +257,65 @@ Mobile chrome:
 1. **Existing 11 users from before 2026-04-25 didn't go through the delegation modal.** Their next /wallet visit will surface the violet "Authorize & continue" card. Until they delegate, their on-chain USDC won't sweep. Happens organically.
 2. **`SWEEP_ENABLED=true` is on Production scope only.** If you ever test on Vercel preview deploys, set it there too.
 3. **Privy app is on Production tier**, same app ID. There is no separate "Dev" environment to flip — config (signers, policies) is already live.
-4. **Migration 035 is the latest applied to prod** (daily bet streak + bump_bet_streak in settle_race). Migrations 033 (instant rakeback) and 034 (tipster leaderboard) are also applied. All earlier migrations are also applied.
+4. **Migration 039 is the latest applied to prod** (affiliate rollup credited_at). Migrations 036-039 are the 2026-04-29 security audit follow-up batch. All earlier migrations are also applied.
+
+## Security audit (2026-04-29)
+
+Five-agent deep audit of wallet, race engine, auth/RBAC, affiliate/referral/bonus, and infra/RLS. Findings ranked by exploit-impact. **All HIGH and CRITICAL items are now fixed in code + migrations 036-039 (applied to prod).** MEDIUM and LOW items remain.
+
+### Fixed (code + migrations 036-039)
+
+- **C1/H1 — Race result leak via /api/race/state.** `finishPosition` and `margin` were written to the DB the instant status flipped to 'racing' and exposed publicly for the entire 20s racing window. Anyone polling could read winners before the canvas played out. Now gated behind `status === 'settled'` (`app/api/race/state/route.ts:215-220`). Checkpoints are still exposed during racing because the canvas needs them to animate; reading them requires trajectory math, not a JSON glance.
+- **C2 — SOL deposit baseline race.** Baseline advanced before `update_balance`; if the credit RPC errored, the deposit was silently lost. Fix: compensating UPDATE rolls the baseline back to its prior value when credit fails (`app/api/wallet/deposit/route.ts:207-241`). The rollback is gated on the baseline still equalling what we just wrote so concurrent successes aren't stomped.
+- **#2 — Affiliate self-referral block.** Mig 025 only patched the simple 20% path. The affiliate path (35–45% NGR) had no dedup — could invert house edge to negative. Mig 036 mirrors the fingerprint/IP/email dedup into `accrue_referral_reward`.
+- **#4 — AUTO_SEND_THRESHOLD.** Was $500, docs said $100. Set to **$250** based on $5K hot wallet float. Worst-case auto-drain per compromised account = 3 × $250 = $750/24h, ~15% of float. Bump to $500 when hot wallet float reaches ~$20K+ (`app/api/wallet/withdraw/route.ts:17-21`).
+- **#5 — Concurrent-withdrawal TOCTOU.** "No pending withdrawals?" SELECT then INSERT had a race that let two concurrent requests both debit. Mig 036 adds partial UNIQUE index `(user_id) WHERE type='withdrawal' AND status='pending'`; route surfaces 409 on 23505 (`app/api/wallet/withdraw/route.ts:262-275`).
+- **#6 — Idempotent withdrawal refund.** Both refund paths (`not_submitted` and on-chain `failed`) called `update_balance` then UPDATE-status with no transition guard. Vercel timeout + retry → double refund. Mig 037 introduces `withdrawal_refund_atomic` which claims the tx via `UPDATE … WHERE status != 'failed' RETURNING`. Both refund call sites now use it.
+- **#7 — Affiliate rollup double-credit.** `rollup_weekly_periods` used `updated_at > NOW() - INTERVAL '1 day'` to find just-transitioned claimable rows; cron rerun re-credited the same period. Mig 039 adds `credited_at` column, replaces the rollup with a CTE-based `UPDATE … RETURNING` that atomically claims uncredited rows.
+- **#9 — Bet history IDOR.** `/api/race/bet/history?userId=X` accepted the query param via `verifyRequest`'s dev-mode body. If `PRIVY_APP_SECRET` ever unset/typo'd in Vercel, this becomes a direct read of any user's bet history. Removed the fallback unconditionally (`app/api/race/bet/history/route.ts:13-19`).
+- **#15 — referral_rewards UNIQUE on race_bet_id.** Settle re-ticks within the 15s results window could re-pay referral commissions. Mig 038 voids existing duplicates (status='voided' for audit), adds partial UNIQUE index, and wraps both accrual function INSERTs in `EXCEPTION WHEN unique_violation` for silent no-op.
+
+### Verified clean (no exploit found)
+
+- Auth coverage: every privileged route has `verifyRequest()` / `verifyAdmin()` / `verifyCron()`. No bypasses.
+- Privy JWT properly verified (full JWKS signature + exp + iss + aud, not base64-decoded).
+- Service role key server-only, not in any `NEXT_PUBLIC_*`.
+- RLS enabled on all tables in migration 012; verify migrations 013-035 also enable RLS on tables they create (open follow-up).
+- No `dangerouslySetInnerHTML` anywhere → chat XSS not exploitable.
+- USDC mint validation correct; fake-mint deposits cannot credit as USDC.
+- Atomic balance updates everywhere via `update_balance()`.
+- Liability cap protected by `SELECT … FOR UPDATE` on race_entries (mig 022).
+- `auth/sync` write-once for wallet/referrer; no account hijack.
+- Hot wallet key never logged or exposed in error responses.
+- No SSRF; Anthropic call uses no user-controlled URLs.
+
+### Remaining audit items (not yet fixed)
+
+Ranked by impact. None are launch-blockers, but worth working through pre-/post-launch.
+
+**MEDIUM:**
+- **#11** — `/api/race/state` calls `tick()` on public traffic. Bypasses CRON_SECRET intent, DoS/cost amplification, future tick non-idempotency becomes exploitable. Fix: stop calling `tick()` from the state endpoint, rely on the Vercel cron, or gate behind a server-side guard. (`app/api/race/state/route.ts:22, 50, 65, 69`)
+- **#12** — SOL price fallback to hardcoded $150 if CoinGecko 5xx's. Mispricing window. Refuse to credit on stale oracle, or use Pyth/Switchboard as second oracle. (`lib/wallet/solana.ts:277-282`)
+- **#13** — `getOrCreateAssociatedTokenAccount` paid by hot wallet — Sybil rotation bleeds ~0.002 SOL per fresh destination. Pre-flight check that destination is system-owned + reject ATA creation entirely (require user to have ATA). (`lib/wallet/send-usdc.ts:89-95`)
+- **#14** — `last_processed_slot` advances past failed credits. Non-23505 errors permanently lose deposits. Only update for actually-processed signatures. (`app/api/wallet/deposit/route.ts:147-184, 231-237`)
+- **#16** — Vanity slug squatting. Regex allows `admin`, `wallet`, `racing`, `api`, `r`, etc. Add reserved-slug list checked at insert. (`migrations/016_vanity_affiliate_slugs.sql:24`)
+- **#17** — Affiliate application dedup doesn't normalize Gmail dots/+aliases. (`app/api/affiliates/apply/route.ts:101-114`)
+- **#18** — CSP is `Report-Only` with `unsafe-inline` + `unsafe-eval`. Promote to enforcing pre-launch. (`next.config.ts:46`)
+- **#19** — `from_bonus_amount` ratio not clamped in settle_race (defensive only — admin update could break it).
+
+**LOW:**
+- M3 — `total_wagered_since_signup` includes bonus-funded stake → 3× wagering activation gate clearable without real money. Exclude `from_bonus_amount` from the increment in `place_race_bet_atomic`.
+- L1 — Hot wallet keypair re-decoded on every request. Cache after first load. (`lib/wallet/send-usdc.ts:26-32`)
+- L5 — No Solana re-org handling at commitment="confirmed". Document the risk.
+- Single shared admin password, no per-admin audit identity. Acceptable for solo founder; add per-admin TOTP once second admin exists.
+- Admin login rate limit is in-memory, per-instance. Move to DB-backed counter.
+
+**Open verification task:**
+- Run `SELECT relname, relrowsecurity FROM pg_class WHERE relkind='r' AND relnamespace='public'::regnamespace` on prod. Confirm RLS is enabled on every table created by migrations 013-035 — especially `referrals`, `affiliate_clicks`, `rakeback_accruals`, `email_log`, `admin_actions`, `vanity_slugs`, `daily_claims`. Anything missed is anon-readable/writeable via the public anon key.
+
+### Suggested next batch
+
+Connor paused after #7. When picking back up, the most efficient next step is **#11 + #14 batched** — both small deposit/state route fixes, no migration needed. Then **#18 (enforce CSP)** before launch, and the RLS verification SQL one-liner. The remaining MEDs are post-launch hygiene.
 
 ## Recent migrations applied to prod (April 2026)
 
@@ -281,6 +339,10 @@ All `CREATE OR REPLACE` / `ADD COLUMN IF NOT EXISTS` style — safe to re-run.
 - **033** — instant rakeback. `accrue_rakeback` credits balance directly per settled bet, excludes bonus-funded stake portion, one-shot drain of legacy `rakeback_claimable` to balance with `rakeback_backfill_033` audit txs. `claim_rakeback` kept as back-compat shim.
 - **034** — tipster leaderboard. `tipster_leaderboard(window, limit, min_bets, min_cash)` RPC + partial index on settled bets. Pure cash-skill ROI ranking.
 - **035** — daily bet streak. `current_streak`/`longest_streak`/`last_streak_day`/`last_streak_nudge_at` columns + `bump_bet_streak()` called from `settle_race`. UTC-day idempotent.
+- **036** — security audit fixes #1: affiliate-path self-referral block (mirrors mig 025 dedup logic into `accrue_referral_reward`); partial UNIQUE index on transactions `(user_id) WHERE type='withdrawal' AND status='pending'` to close the concurrent-withdrawal TOCTOU.
+- **037** — idempotent withdrawal refund. New `withdrawal_refund_atomic(tx_id, reason, error_type, error_message, signature?)` SQL function — claims the tx via `UPDATE … WHERE status != 'failed' RETURNING` so retries (Vercel timeout, reconciliation tooling) become no-ops instead of double-crediting.
+- **038** — referral_rewards UNIQUE on race_bet_id. Voids any pre-existing duplicates, adds partial UNIQUE index, and wraps both `accrue_referral_reward` + `accrue_simple_referral_reward` INSERTs in `EXCEPTION WHEN unique_violation` so settle_race re-ticks (within the 15s results window) become no-ops instead of paying commission twice.
+- **039** — affiliate rollup credited_at. Adds `affiliate_periods.credited_at`; replaces `rollup_weekly_periods` with a CTE-based `UPDATE … RETURNING` pattern that atomically claims uncredited rows and only credits `users.referral_earnings` from those it claimed. Backfills existing claimable/paid rows so they don't re-credit. Closes the cron-rerun double-credit hole.
 
 ## Bonus economics (for reference)
 

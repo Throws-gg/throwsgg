@@ -214,8 +214,14 @@ export async function GET() {
         maxLiability: current.status === "betting" ? maxRaceLiability : undefined,
         trueProbability: exposeHiddenFields ? parseFloat(e.true_probability) : undefined,
         powerScore: exposeHiddenFields && e.power_score ? parseFloat(e.power_score) : undefined,
-        finishPosition: e.finish_position || undefined,
-        margin: e.margin ? parseFloat(e.margin) : undefined,
+        // finish_position / margin are written to the DB at the moment we flip
+        // to status='racing' (engine.runRace), so they exist in the row for
+        // the entire 20s racing window. Exposing them in this endpoint lets
+        // anyone polling /api/race/state read the winner instantly instead of
+        // watching the animation. Gate behind 'settled' so the result is only
+        // public once the race has actually finished.
+        finishPosition: exposeHiddenFields ? (e.finish_position || undefined) : undefined,
+        margin: exposeHiddenFields && e.margin ? parseFloat(e.margin) : undefined,
       };
     });
 

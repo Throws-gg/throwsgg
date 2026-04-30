@@ -13,8 +13,12 @@ import { trackServer } from "@/lib/analytics/posthog-server";
 import { sendEmail } from "@/lib/email/send";
 import WithdrawalSent from "@/lib/email/templates/WithdrawalSent";
 
-// Auto-send threshold — withdrawals above this require manual admin approval
-const AUTO_SEND_THRESHOLD = 500;
+// Auto-send threshold — withdrawals above this require manual admin approval.
+// Sized against hot wallet float (~$5K) and per-account caps (3/day, $2K/week):
+// worst-case auto-drain per compromised account = 3 × threshold in 24h.
+// $250 keeps that under $750/day (~15% of float) while still letting legit
+// 2.5×-max-bet wins cash out instantly.
+const AUTO_SEND_THRESHOLD = 250;
 
 // Rate limit: max withdrawals per user per 24h
 const MAX_WITHDRAWALS_PER_DAY = 3;
@@ -253,6 +257,16 @@ export async function POST(request: NextRequest) {
     );
 
     if (balanceError) {
+      // 23505 = unique_violation, fired by the partial unique index on
+      // (user_id) WHERE type='withdrawal' AND status='pending' (mig 036).
+      // This is the concurrent-request guard — surface a clear 409 rather
+      // than the generic insufficient-balance message.
+      if (balanceError.code === "23505") {
+        return NextResponse.json(
+          { error: "You already have a pending withdrawal" },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         { error: "Insufficient balance" },
         { status: 400 }
@@ -339,33 +353,17 @@ export async function POST(request: NextRequest) {
         // The tx never hit the network. Safe to refund in full.
         console.error("Auto-send failed (not submitted):", sendResult.error);
 
-        await supabase.rpc("update_balance", {
-          p_user_id: user.dbUserId,
-          p_amount: totalDeduction,
-          p_type: "deposit",
-          p_currency: "USD",
-          p_metadata: {
-            type: "withdrawal_refund",
-            original_tx: txRecord.id,
-            reason: "tx_not_submitted",
-            error: sendResult.error,
-          },
+        // Idempotent: the SQL function claims the tx via a status transition
+        // and only credits balance if the claim succeeds. A retry of this
+        // path (Vercel timeout + client retry, reconciliation tool, etc.)
+        // sees status='failed' already and is a no-op.
+        await supabase.rpc("withdrawal_refund_atomic", {
+          p_tx_id: txRecord.id,
+          p_reason: "tx_not_submitted",
+          p_error_type: "not_submitted",
+          p_error_message: sendResult.error ?? null,
+          p_signature: null,
         });
-
-        await supabase
-          .from("transactions")
-          .update({
-            status: "failed",
-            metadata: {
-              amount_usd: amount,
-              fee_usd: fee,
-              currency: "USDC",
-              network: "solana",
-              error_type: "not_submitted",
-              error_message: sendResult.error,
-            },
-          })
-          .eq("id", txRecord.id);
 
         trackServer(user.dbUserId, "withdrawal_failed", {
           amount_usd: amount,
@@ -459,34 +457,14 @@ export async function POST(request: NextRequest) {
 
       if (chainStatus === "failed") {
         // Tx was submitted but the chain rejected it. Safe to refund.
-        await supabase.rpc("update_balance", {
-          p_user_id: user.dbUserId,
-          p_amount: totalDeduction,
-          p_type: "deposit",
-          p_currency: "USD",
-          p_metadata: {
-            type: "withdrawal_refund",
-            original_tx: txRecord.id,
-            reason: "tx_failed_on_chain",
-            signature: sendResult.signature,
-          },
+        // Idempotent — see note above.
+        await supabase.rpc("withdrawal_refund_atomic", {
+          p_tx_id: txRecord.id,
+          p_reason: "tx_failed_on_chain",
+          p_error_type: "on_chain_failed",
+          p_error_message: sendResult.error ?? null,
+          p_signature: sendResult.signature,
         });
-
-        await supabase
-          .from("transactions")
-          .update({
-            status: "failed",
-            tx_hash: sendResult.signature,
-            metadata: {
-              amount_usd: amount,
-              fee_usd: fee,
-              currency: "USDC",
-              network: "solana",
-              error_type: "on_chain_failed",
-              error_message: sendResult.error,
-            },
-          })
-          .eq("id", txRecord.id);
 
         trackServer(user.dbUserId, "withdrawal_failed", {
           amount_usd: amount,

@@ -10,12 +10,10 @@ import { verifyRequest } from "@/lib/auth/verify-request";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
-  // Dev-mode fallback still supports userId query param via verifyRequest
-  const devUserId = searchParams.get("userId");
-  const authed = await verifyRequest(
-    request,
-    devUserId ? { userId: devUserId } : undefined
-  );
+  // Auth is JWT-only — never accept ?userId= from the query. If the prod
+  // dev-mode guard ever regresses (e.g. PRIVY_APP_SECRET unset), trusting the
+  // query param would be a direct IDOR into any user's bet history.
+  const authed = await verifyRequest(request);
   if (!authed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

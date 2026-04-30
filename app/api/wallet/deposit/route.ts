@@ -221,7 +221,33 @@ export async function POST(request: NextRequest) {
         if (!error) {
           solCreditedUsd = solUsd;
         } else {
+          // Credit failed AFTER the baseline was advanced. If we leave it,
+          // the next poll sees solDelta=0 and the user's deposit is silently
+          // lost. Roll the baseline back to the prior value so the next poll
+          // re-attempts the credit. The compensating UPDATE is gated on the
+          // baseline still equalling the value we just wrote — if a later
+          // request has already advanced it further, that newer credit
+          // path owns the delta and we leave it alone.
           console.error("update_balance (SOL deposit) failed:", error);
+          const priorBaseline = existingAddr.sol_baseline_lamports ?? 0;
+          const { error: rollbackErr } = await supabase
+            .from("deposit_addresses")
+            .update({ sol_baseline_lamports: priorBaseline })
+            .eq("user_id", userId)
+            .eq("chain", "solana")
+            .eq("sol_baseline_lamports", balances.solLamports);
+          if (rollbackErr) {
+            console.error(
+              "SOL baseline rollback failed — manual reconciliation needed:",
+              {
+                userId,
+                priorBaseline,
+                attemptedBaseline: balances.solLamports,
+                solUsd,
+                rollbackErr,
+              },
+            );
+          }
         }
       }
     }
