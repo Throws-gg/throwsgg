@@ -11,21 +11,21 @@ import { getSolanaEmbeddedAddress } from "@/lib/auth/privy";
 /**
  * POST /api/wallet/deposit
  *
- * Detect new on-chain deposits and credit the user's game balance.
+ * Detect new on-chain USDC deposits and credit the user's game balance only
+ * after custody is confirmed.
  *
- * USDC path (per-signature dedup, race-safe):
+ * USDC path (custody-first, per-signature dedup, race-safe):
  *   1. Enumerate USDC transfer signatures to the user's ATA since the last
  *      processed slot.
- *   2. For each signature, call `update_balance` with `p_tx_hash = signature`.
+ *   2. Sweep the user's current USDC ATA balance to the house hot wallet.
+ *   3. Only after the sweep succeeds, call `update_balance` per signature.
  *      A `UNIQUE` partial index on `transactions.tx_hash` turns a concurrent
  *      retry into a constraint violation — credited exactly once.
- *   3. Update `deposit_addresses.last_processed_slot` so the next call only
+ *   4. Update `deposit_addresses.last_processed_slot` so the next call only
  *      scans forward.
  *
- * SOL path (baseline-delta + row lock):
- *   1. Lock the `deposit_addresses` row via select-for-update.
- *   2. Credit `current_sol_usd - baseline_sol_usd` if positive.
- *   3. Update `sol_baseline_lamports` to the current on-chain amount.
+ * SOL deposits are paused. We still keep the SOL baseline current so accidental
+ * SOL sends cannot be credited later by a stale delta if SOL support returns.
  *
  * Foreign (non-USDC) SPL tokens are never credited — see lib/wallet/solana.ts
  * `getForeignTokenBalances()`. We surface a warning on the client instead.
@@ -134,19 +134,189 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // --- USDC PATH: per-signature credit ---
+    // SOL deposits are currently disabled. Keep the baseline current so a SOL
+    // balance increase cannot be credited later by stale delta accounting.
+    const priorSolBaseline = existingAddr.sol_baseline_lamports ?? 0;
+    const solDeltaLamports = balances.solLamports - priorSolBaseline;
+    const solUnsupportedUsd =
+      solDeltaLamports > 0 && balances.solLamports > 0
+        ? solDeltaLamports * (balances.solUsd / balances.solLamports)
+        : 0;
+    if (balances.solLamports !== priorSolBaseline) {
+      const { error: solBaselineError } = await supabase
+        .from("deposit_addresses")
+        .update({ sol_baseline_lamports: balances.solLamports })
+        .eq("user_id", userId)
+        .eq("chain", "solana")
+        .eq("sol_baseline_lamports", priorSolBaseline);
+
+      if (solBaselineError) {
+        console.error("SOL baseline update failed while SOL deposits are disabled:", {
+          userId,
+          priorSolBaseline,
+          currentSolLamports: balances.solLamports,
+          error: solBaselineError.message,
+        });
+      } else if (solDeltaLamports > 0) {
+        trackServer(userId, "sol_deposit_not_credited", {
+          wallet_address: walletAddress,
+          lamports_delta: solDeltaLamports,
+          estimated_usd: solUnsupportedUsd,
+          reason: "sol_deposits_disabled",
+        });
+      }
+    }
+
+    // --- USDC PATH: custody-first per-signature credit ---
     const sinceSlot = existingAddr.last_processed_slot ?? 0;
     const transfers = await getUsdcTransfersIn(walletAddress, { sinceSlot });
 
     // Oldest first so the transactions ledger reflects chain order.
     transfers.sort((a, b) => a.slot - b.slot);
 
-    let totalCreditedUsdc = 0;
-    let newMaxSlot = sinceSlot;
+    const eligibleTransfers = transfers.filter((t) => t.uiAmount >= 0.01);
+    const allTransferMaxSlot = transfers.reduce((max, t) => Math.max(max, t.slot), sinceSlot);
+    const eligibleSignatures = eligibleTransfers.map((t) => t.signature);
+    let alreadyCredited = new Set<string>();
 
-    for (const t of transfers) {
-      if (t.slot > newMaxSlot) newMaxSlot = t.slot;
-      if (t.uiAmount < 0.01) continue;
+    if (eligibleSignatures.length > 0) {
+      const { data: existingDepositTxs, error: existingDepositError } = await supabase
+        .from("transactions")
+        .select("tx_hash")
+        .eq("user_id", userId)
+        .eq("type", "deposit")
+        .in("tx_hash", eligibleSignatures);
+
+      if (existingDepositError) {
+        console.error("Failed to check existing deposit signatures:", existingDepositError);
+        return NextResponse.json({ error: "Failed to check deposits" }, { status: 500 });
+      }
+
+      alreadyCredited = new Set(
+        (existingDepositTxs || [])
+          .map((tx) => tx.tx_hash)
+          .filter((sig): sig is string => typeof sig === "string")
+      );
+    }
+
+    const pendingTransfers = eligibleTransfers.filter((t) => !alreadyCredited.has(t.signature));
+    const pendingUsdcAmount = pendingTransfers.reduce((sum, t) => sum + t.uiAmount, 0);
+
+    const { data: delegationRow } = await supabase
+      .from("users")
+      .select("sweep_delegated_at, sweep_revoked_at")
+      .eq("id", userId)
+      .single();
+    const delegated =
+      !!delegationRow?.sweep_delegated_at && !delegationRow?.sweep_revoked_at;
+
+    let sweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
+
+    if (pendingTransfers.length === 0) {
+      if (allTransferMaxSlot > sinceSlot) {
+        await supabase
+          .from("deposit_addresses")
+          .update({ last_processed_slot: allTransferMaxSlot })
+          .eq("user_id", userId)
+          .eq("chain", "solana");
+      }
+
+      // Residual sweep only. This covers already-credited USDC that previously
+      // failed to sweep, without issuing a second balance credit.
+      if (delegated) {
+        try {
+          sweep = await sweepUserUsdc(walletAddress);
+          if (sweep.status === "swept") {
+            trackServer(userId, "sweep_completed", {
+              wallet_address: walletAddress,
+              amount_usdc: sweep.amount,
+              signature: sweep.signature,
+              source: "residual",
+            });
+          } else if (sweep.status === "failed") {
+            trackServer(userId, "sweep_failed", {
+              wallet_address: walletAddress,
+              amount_usdc: balances.usdc,
+              error: sweep.error,
+              source: "residual",
+            });
+          }
+        } catch (err) {
+          console.error("Residual sweep threw:", err);
+        }
+      }
+
+      return NextResponse.json({
+        status: "no_new_deposits",
+        balances,
+        credited: 0,
+        foreignTokens: balances.foreignTokens,
+        solDepositsEnabled: false,
+        unsupportedSolUsd: solUnsupportedUsd,
+        sweep: sweep
+          ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature, error: sweep.error }
+          : null,
+      });
+    }
+
+    if (!delegated) {
+      trackServer(userId, "deposit_pending_delegation", {
+        wallet_address: walletAddress,
+        pending_usdc: pendingUsdcAmount,
+        transfer_count: pendingTransfers.length,
+      });
+
+      return NextResponse.json({
+        status: "pending_delegation",
+        balances,
+        credited: 0,
+        pendingUsdc: pendingUsdcAmount,
+        transferCount: pendingTransfers.length,
+        foreignTokens: balances.foreignTokens,
+        solDepositsEnabled: false,
+        unsupportedSolUsd: solUnsupportedUsd,
+      });
+    }
+
+    try {
+      sweep = await sweepUserUsdc(walletAddress);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sweep = { status: "failed", error: message };
+    }
+
+    const sweptEnough =
+      sweep.status === "swept" &&
+      typeof sweep.amount === "number" &&
+      sweep.amount + 0.000001 >= pendingUsdcAmount;
+
+    if (!sweptEnough) {
+      trackServer(userId, "deposit_sweep_required_before_credit", {
+        wallet_address: walletAddress,
+        pending_usdc: pendingUsdcAmount,
+        transfer_count: pendingTransfers.length,
+        sweep_status: sweep.status,
+        sweep_amount: sweep.amount ?? 0,
+        sweep_error: sweep.error ?? null,
+      });
+
+      return NextResponse.json({
+        status: sweep.status === "failed" ? "sweep_failed" : "pending_sweep",
+        balances,
+        credited: 0,
+        pendingUsdc: pendingUsdcAmount,
+        transferCount: pendingTransfers.length,
+        foreignTokens: balances.foreignTokens,
+        solDepositsEnabled: false,
+        unsupportedSolUsd: solUnsupportedUsd,
+        sweep: { status: sweep.status, amount: sweep.amount, signature: sweep.signature, error: sweep.error },
+      });
+    }
+
+    let totalCreditedUsdc = 0;
+    let creditFailed = false;
+
+    for (const t of pendingTransfers) {
 
       try {
         const { error } = await supabase.rpc("update_balance", {
@@ -158,6 +328,9 @@ export async function POST(request: NextRequest) {
           p_tx_hash: t.signature,
           p_metadata: {
             source: "usdc_transfer",
+            custody: "swept_to_hot_wallet",
+            sweep_signature: sweep.signature,
+            sweep_amount_usdc: sweep.amount,
             signature: t.signature,
             slot: t.slot,
             block_time: t.blockTime,
@@ -166,155 +339,73 @@ export async function POST(request: NextRequest) {
         });
 
         if (error) {
-          // 23505 = unique_violation on tx_hash → already credited, skip.
-          if (error.code === "23505") continue;
+          // We filtered this user's existing deposit txs before sweeping. A
+          // 23505 here means either a concurrent request won the race or the
+          // legacy global tx_hash unique index collided with another recipient
+          // in the same Solana transaction. Do not advance the cursor from this
+          // request; the next poll can distinguish a same-user duplicate from a
+          // real collision before trying again.
+          if (error.code === "23505") {
+            console.error("update_balance duplicate after custody sweep:", {
+              signature: t.signature,
+              sweepSignature: sweep.signature,
+            });
+            creditFailed = true;
+            break;
+          }
           console.error("update_balance (USDC deposit) failed:", {
             signature: t.signature,
+            sweepSignature: sweep.signature,
             code: error.code,
             message: error.message,
           });
-          continue;
+          creditFailed = true;
+          break;
         }
 
         totalCreditedUsdc += t.uiAmount;
       } catch (err) {
         console.error("update_balance threw:", err);
-        continue;
+        creditFailed = true;
+        break;
       }
     }
 
-    // --- SOL PATH: row-locked baseline-delta ---
-    // The RPC below is a no-op if the baseline already matches current on-chain.
-    // If SOL has grown, credit the USD delta and bump the baseline.
-    let solCreditedUsd = 0;
-    const solDelta = balances.solLamports - (existingAddr.sol_baseline_lamports ?? 0);
-    if (solDelta > 0) {
-      const solUsdPerLamport = balances.solLamports > 0 ? balances.solUsd / balances.solLamports : 0;
-      const solUsd = solDelta * solUsdPerLamport;
-
-      // Row lock on the deposit_addresses row serialises concurrent requests.
-      // We use a single atomic UPDATE … RETURNING so two concurrent updaters
-      // race on the WHERE clause and only one wins.
-      const { data: claimed } = await supabase
-        .from("deposit_addresses")
-        .update({ sol_baseline_lamports: balances.solLamports })
-        .eq("user_id", userId)
-        .eq("chain", "solana")
-        .eq("sol_baseline_lamports", existingAddr.sol_baseline_lamports ?? 0)
-        .select("sol_baseline_lamports")
-        .single();
-
-      if (claimed && solUsd >= 0.01) {
-        const { error } = await supabase.rpc("update_balance", {
-          p_user_id: userId,
-          p_amount: solUsd,
-          p_type: "deposit",
-          p_currency: "USD",
-          p_address: walletAddress,
-          p_metadata: {
-            source: "sol_transfer",
-            lamports_delta: solDelta,
-            sol_usd: solUsd,
-            sol_baseline_lamports_after: balances.solLamports,
-          },
-        });
-        if (!error) {
-          solCreditedUsd = solUsd;
-        } else {
-          // Credit failed AFTER the baseline was advanced. If we leave it,
-          // the next poll sees solDelta=0 and the user's deposit is silently
-          // lost. Roll the baseline back to the prior value so the next poll
-          // re-attempts the credit. The compensating UPDATE is gated on the
-          // baseline still equalling the value we just wrote — if a later
-          // request has already advanced it further, that newer credit
-          // path owns the delta and we leave it alone.
-          console.error("update_balance (SOL deposit) failed:", error);
-          const priorBaseline = existingAddr.sol_baseline_lamports ?? 0;
-          const { error: rollbackErr } = await supabase
-            .from("deposit_addresses")
-            .update({ sol_baseline_lamports: priorBaseline })
-            .eq("user_id", userId)
-            .eq("chain", "solana")
-            .eq("sol_baseline_lamports", balances.solLamports);
-          if (rollbackErr) {
-            console.error(
-              "SOL baseline rollback failed — manual reconciliation needed:",
-              {
-                userId,
-                priorBaseline,
-                attemptedBaseline: balances.solLamports,
-                solUsd,
-                rollbackErr,
-              },
-            );
-          }
-        }
-      }
+    if (creditFailed) {
+      trackServer(userId, "deposit_credit_failed_after_sweep", {
+        wallet_address: walletAddress,
+        pending_usdc: pendingUsdcAmount,
+        credited_usdc_before_failure: totalCreditedUsdc,
+        sweep_signature: sweep.signature,
+      });
+      return NextResponse.json(
+        { error: "Deposit swept but credit failed. Support has been notified." },
+        { status: 500 }
+      );
     }
 
-    // Bump the USDC cursor. Only do this AFTER the credits have landed so that
-    // a crash mid-loop leaves unprocessed signatures to retry on next poll.
-    if (newMaxSlot > sinceSlot) {
+    // Bump the USDC cursor only after custody is confirmed and credits have
+    // landed. A failed sweep or credit leaves signatures to retry on next poll.
+    if (allTransferMaxSlot > sinceSlot) {
       await supabase
         .from("deposit_addresses")
-        .update({ last_processed_slot: newMaxSlot })
+        .update({ last_processed_slot: allTransferMaxSlot })
         .eq("user_id", userId)
         .eq("chain", "solana");
     }
 
-    const totalCreditedUsd = totalCreditedUsdc + solCreditedUsd;
+    const totalCreditedUsd = totalCreditedUsdc;
 
-    // Even when there's nothing new to credit, we still want to sweep any
-    // residual USDC that's sitting at the user's wallet on-chain — could be
-    // funds that arrived before the user delegated, or a previous sweep that
-    // failed mid-flight. Idempotent: sweepUserUsdc reads the live on-chain
-    // balance itself and no-ops at zero, so this is safe to fire unconditionally.
-    //
-    // Note: we deliberately do NOT gate on balances.usdc > 0 here. That value
-    // comes from getUsdcBalance() which silently returns 0 on any RPC blip.
-    // The sweep helper does its own balance read (cheap), and that read is the
-    // authoritative one — if it sees nothing to send, status="skipped_zero".
     if (totalCreditedUsd < 0.01) {
-      let residualSweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
-      {
-        const { data: delegationRow } = await supabase
-          .from("users")
-          .select("sweep_delegated_at, sweep_revoked_at")
-          .eq("id", userId)
-          .single();
-        const delegated =
-          !!delegationRow?.sweep_delegated_at && !delegationRow?.sweep_revoked_at;
-        if (delegated) {
-          try {
-            residualSweep = await sweepUserUsdc(walletAddress);
-            if (residualSweep.status === "swept") {
-              trackServer(userId, "sweep_completed", {
-                wallet_address: walletAddress,
-                amount_usdc: residualSweep.amount,
-                signature: residualSweep.signature,
-                source: "residual",
-              });
-            } else if (residualSweep.status === "failed") {
-              trackServer(userId, "sweep_failed", {
-                wallet_address: walletAddress,
-                amount_usdc: balances.usdc,
-                error: residualSweep.error,
-                source: "residual",
-              });
-            }
-          } catch (err) {
-            console.error("Residual sweep threw:", err);
-          }
-        }
-      }
-
       return NextResponse.json({
         status: "no_new_deposits",
         balances,
         credited: 0,
         foreignTokens: balances.foreignTokens,
-        sweep: residualSweep
-          ? { status: residualSweep.status, amount: residualSweep.amount, signature: residualSweep.signature, error: residualSweep.error }
+        solDepositsEnabled: false,
+        unsupportedSolUsd: solUnsupportedUsd,
+        sweep: sweep
+          ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature, error: sweep.error }
           : null,
       });
     }
@@ -335,17 +426,19 @@ export async function POST(request: NextRequest) {
       .eq("type", "deposit")
       .gt("amount", 0);
 
-    const isFirstDeposit = (depositCount ?? 0) <= transfers.length + (solCreditedUsd > 0 ? 1 : 0);
+    const isFirstDeposit = (depositCount ?? 0) <= pendingTransfers.length;
 
     trackServer(userId, "deposit_completed", {
       amount_usd: totalCreditedUsd,
       usdc_credited: totalCreditedUsdc,
-      sol_credited_usd: solCreditedUsd,
+      sol_credited_usd: 0,
       chain: "solana",
-      transfer_count: transfers.length,
+      transfer_count: pendingTransfers.length,
       new_balance: newBalance,
       is_first_deposit: isFirstDeposit,
       wallet_address: walletAddress,
+      sweep_signature: sweep.signature,
+      sweep_amount_usdc: sweep.amount,
     });
 
     identifyServer(userId, {
@@ -353,9 +446,8 @@ export async function POST(request: NextRequest) {
       has_deposited: true,
     });
 
-    // Fire deposit-received email (transactional, always sends). Idempotency
-    // keyed on the latest signature so a retry of the deposit poll doesn't
-    // re-send. SOL-only deposits (no USDC transfer) use the slot as the key.
+    // Fire deposit-received email (transactional, always sends). Idempotency is
+    // keyed on the latest credited USDC signature so retries don't re-send.
     const { data: emailUser } = await supabase
       .from("users")
       .select("email, username")
@@ -363,9 +455,7 @@ export async function POST(request: NextRequest) {
       .single();
     if (emailUser?.email) {
       const latestSig =
-        transfers.length > 0
-          ? transfers[transfers.length - 1].signature
-          : `sol-${newMaxSlot}`;
+        pendingTransfers[pendingTransfers.length - 1]?.signature ?? sweep.signature;
       sendEmail({
         to: emailUser.email,
         subject: `Your deposit has been credited`,
@@ -375,56 +465,11 @@ export async function POST(request: NextRequest) {
         react: DepositReceived({
           username: emailUser.username,
           amountUsd: totalCreditedUsd,
-          token: totalCreditedUsdc >= solCreditedUsd ? "USDC" : "SOL",
+          token: "USDC",
           newBalance,
-          txSignature: transfers.length > 0 ? latestSig : undefined,
+          txSignature: latestSig,
         }),
       }).catch((err) => console.error("Deposit email failed:", err));
-    }
-
-    // Sweep the user's USDC into the hot wallet — only if they've delegated.
-    // Without this step, deposited USDC sits in the user's embedded wallet
-    // forever and the hot wallet bleeds funding withdrawals from its float.
-    //
-    // Best-effort: a sweep failure does NOT roll back the credit. The credit
-    // is recorded in our DB; the on-chain USDC stays at the user's address
-    // and we'll retry next deposit poll, or via admin tooling.
-    //
-    // Gated on sweep_delegated_at — set after the user clicks through the
-    // Privy delegation modal. If they haven't, we leave the funds and let
-    // the client surface a "please authorize" CTA on next deposit attempt.
-    let sweep: { status: string; amount?: number; signature?: string; error?: string } | null = null;
-    if (totalCreditedUsdc > 0) {
-      const { data: delegationRow } = await supabase
-        .from("users")
-        .select("sweep_delegated_at, sweep_revoked_at")
-        .eq("id", userId)
-        .single();
-      const delegated =
-        !!delegationRow?.sweep_delegated_at && !delegationRow?.sweep_revoked_at;
-
-      if (delegated) {
-        try {
-          sweep = await sweepUserUsdc(walletAddress);
-          if (sweep.status === "failed") {
-            // Log + carry on. Admin tooling or next deposit poll will retry.
-            // We don't block the response — user's balance is already credited.
-            trackServer(userId, "sweep_failed", {
-              wallet_address: walletAddress,
-              amount_usdc: totalCreditedUsdc,
-              error: sweep.error,
-            });
-          } else if (sweep.status === "swept") {
-            trackServer(userId, "sweep_completed", {
-              wallet_address: walletAddress,
-              amount_usdc: sweep.amount,
-              signature: sweep.signature,
-            });
-          }
-        } catch (err) {
-          console.error("Sweep threw unexpectedly:", err);
-        }
-      }
     }
 
     return NextResponse.json({
@@ -433,6 +478,8 @@ export async function POST(request: NextRequest) {
       balances,
       newBalance,
       foreignTokens: balances.foreignTokens,
+      solDepositsEnabled: false,
+      unsupportedSolUsd: solUnsupportedUsd,
       sweep: sweep
         ? { status: sweep.status, amount: sweep.amount, signature: sweep.signature, error: sweep.error }
         : null,

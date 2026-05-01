@@ -199,9 +199,9 @@ export default function WalletPage() {
           </h2>
           <div className="space-y-2">
             {[
-              { q: "How fast are deposits?", a: "Crypto deposits are detected within 30 seconds. Card purchases process in ~2 minutes via MoonPay." },
+              { q: "How fast are deposits?", a: "USDC deposits are detected after the funds are swept into custody. Card purchases process in ~2 minutes via MoonPay." },
               { q: "How do withdrawals work?", a: "Withdrawals are manually reviewed and processed within 24 hours to your connected Solana wallet." },
-              { q: "What tokens can I deposit?", a: "USDC and SOL on Solana. SOL auto-converts to USD balance at current market rate." },
+              { q: "What tokens can I deposit?", a: "USDC on Solana. SOL deposits are paused and will not credit automatically." },
               { q: "Is there a minimum deposit?", a: "$1 for crypto. $25 for card purchases (MoonPay minimum)." },
             ].map((faq, i) => (
               <div key={i} className="rounded-xl border border-white/[0.04] bg-white/[0.02] px-4 py-3">

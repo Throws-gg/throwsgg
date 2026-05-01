@@ -214,19 +214,41 @@ export async function closeRace(raceId: string) {
 }
 
 export async function runRace(raceId: string) {
-  // Get race + entries + horses
-  const { data: race } = await db()
+  // Claim closed -> racing atomically so concurrent ticks cannot stampede the
+  // simulation boundary. If another caller already claimed it, return safely.
+  const { data: existingRace } = await db()
     .from("races")
-    .select("server_seed, client_seed, nonce, distance, ground")
+    .select("status, server_seed, client_seed, nonce, distance, ground")
     .eq("id", raceId)
     .single();
 
-  if (!race) throw new Error("Race not found");
+  if (!existingRace) throw new Error("Race not found");
+
+  let race = existingRace;
+  if (existingRace.status === "closed") {
+    const { data: claimedRace, error: claimError } = await db()
+      .from("races")
+      .update({
+        status: "racing",
+        race_starts_at: new Date().toISOString(),
+      })
+      .eq("id", raceId)
+      .eq("status", "closed")
+      .select("status, server_seed, client_seed, nonce, distance, ground")
+      .maybeSingle();
+
+    if (claimError) throw new Error(`Failed to claim race start: ${claimError.message}`);
+    if (!claimedRace) return null;
+    race = claimedRace;
+  } else if (existingRace.status !== "racing") {
+    return null;
+  }
 
   const { data: entries } = await db()
     .from("race_entries")
     .select("horse_id, snapshot_form, horses(id, speed, stamina, form, consistency, ground_preference)")
-    .eq("race_id", raceId);
+    .eq("race_id", raceId)
+    .order("gate_position", { ascending: true });
 
   if (!entries || entries.length === 0) {
     // Orphan race with no entries — can happen if entry insertion failed
@@ -268,18 +290,9 @@ export async function runRace(raceId: string) {
     race.ground as GroundCondition
   );
 
-  // Update race status
-  await db()
-    .from("races")
-    .update({
-      status: "racing",
-      race_starts_at: new Date().toISOString(),
-    })
-    .eq("id", raceId);
-
   // Write finish positions to entries — batch update with error checking
   for (const finish of result.finishOrder) {
-    const { error, count } = await db()
+    const { error } = await db()
       .from("race_entries")
       .update({
         power_score: finish.powerScore,
@@ -361,14 +374,17 @@ export async function settleRace(raceId: string) {
 
   if (!race) throw new Error("Race not found");
 
-  // Settle via RPC
-  const { error } = await db().rpc("settle_race", {
+  // Settle via an atomic claim-once RPC. If another tick already moved this
+  // race to settled, skip non-financial side effects so horse stats/chat/etc.
+  // cannot be double-applied.
+  const { data: didSettle, error } = await db().rpc("settle_race_once", {
     p_race_id: raceId,
     p_winning_horse_id: winner.horse_id,
     p_server_seed: race.server_seed,
   });
 
   if (error) throw new Error(`Settlement failed: ${error.message}`);
+  if (!didSettle) return;
 
   // Track race settlement + individual bet outcomes
   try {

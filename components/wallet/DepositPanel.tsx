@@ -303,8 +303,8 @@ export function DepositPanel() {
             Unsupported token detected in your wallet
           </p>
           <p className="text-white/60 text-xs leading-relaxed">
-            We only accept <span className="font-mono text-white/80">USDC</span> and{" "}
-            <span className="font-mono text-white/80">SOL</span> on Solana. The following tokens arrived but have NOT been credited:
+            We only accept <span className="font-mono text-white/80">USDC</span> on Solana.
+            The following tokens arrived but have NOT been credited:
           </p>
           <ul className="text-white/70 text-xs font-mono pl-4 list-disc">
             {foreignTokens.map((t) => (
@@ -394,7 +394,7 @@ export function DepositPanel() {
             <div className="text-center space-y-1">
               <h3 className="text-white font-semibold">Deposit Address</h3>
               <p className="text-white/35 text-xs">
-                Send USDC or SOL on the Solana network
+                Send USDC on the Solana network
               </p>
             </div>
 
@@ -450,19 +450,6 @@ export function DepositPanel() {
                 </div>
                 <span className="text-[10px] text-white/20 bg-white/[0.04] px-2 py-0.5 rounded">Solana</span>
               </div>
-              <div className="border-t border-white/[0.04]" />
-              <div className="flex items-center justify-between py-1.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#9945FF]/15 to-[#14F195]/15 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-[#9945FF]">◎</span>
-                  </div>
-                  <div>
-                    <p className="text-sm text-white font-medium">SOL</p>
-                    <p className="text-[10px] text-white/25">Auto-converts to USD</p>
-                  </div>
-                </div>
-                <span className="text-[10px] text-white/20 bg-white/[0.04] px-2 py-0.5 rounded">Solana</span>
-              </div>
             </div>
           </div>
 
@@ -470,8 +457,8 @@ export function DepositPanel() {
           <div className="rounded-xl border border-amber-500/10 bg-amber-500/[0.03] px-4 py-3 flex items-start gap-2.5">
             <WarningIcon className="w-4 h-4 text-amber-500/40 mt-0.5 shrink-0" />
             <p className="text-amber-500/50 text-[11px] leading-relaxed">
-              Only send assets on the <strong className="text-amber-500/70">Solana</strong> network.
-              Sending on other networks will result in permanent loss of funds.
+              Only send <strong className="text-amber-500/70">USDC on Solana</strong>.
+              SOL and other tokens are not credited.
               Minimum deposit: $1.00
             </p>
           </div>

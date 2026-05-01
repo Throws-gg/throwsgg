@@ -20,8 +20,8 @@ export default function FirstDepositNudge({
       <Text style={headingStyle}>Ready whenever you are, {username}</Text>
       <Text style={textStyle}>
         You signed up but haven&apos;t made a deposit yet. Whenever you&apos;re
-        ready, you can deposit USDC or SOL on Solana. Minimum is 1 USDC, no KYC
-        under 2,000 USDC, and the credit usually shows up in under a minute.
+        ready, you can deposit USDC on Solana. Minimum is 1 USDC, no KYC
+        under 2,000 USDC, and credit lands after the funds are swept into custody.
       </Text>
       <Text style={textStyle}>
         The next race is always less than three minutes away. Pick a horse,

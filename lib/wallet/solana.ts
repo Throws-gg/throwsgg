@@ -7,8 +7,6 @@ const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.c
 // USDC mint on Solana mainnet
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const USDC_MINT_STRING = USDC_MINT.toBase58();
-// USDC has 6 decimals
-const USDC_DECIMALS = 6;
 
 // Solana Token Program (classic SPL). PYUSD / USDT / USDC all live here.
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -205,40 +203,27 @@ export async function getUsdcTransfersIn(
       });
       if (!tx) continue;
 
-      // Inspect pre/post token balances for our ATA. If the post balance is
-      // greater than the pre balance, it was an incoming transfer.
+      // Inspect pre/post token balances for the exact USDC ATA. Matching only
+      // by owner+mint is unsafe: a transaction can touch this ATA while moving
+      // USDC into a different token account owned by the same wallet.
       const pre = tx.meta?.preTokenBalances ?? [];
       const post = tx.meta?.postTokenBalances ?? [];
       const ataStr = ata.toBase58();
-
-      const preMatch = pre.find(
-        (b) => b.owner === walletAddress && b.mint === USDC_MINT_STRING
+      const accounts = tx.transaction.message.accountKeys;
+      const ataIndex = accounts.findIndex((a) =>
+        (typeof a === "string" ? a : a.pubkey.toBase58()) === ataStr
       );
-      const postMatch = post.find(
-        (b) => b.owner === walletAddress && b.mint === USDC_MINT_STRING
+      if (ataIndex < 0) continue;
+
+      const preEntry = pre.find(
+        (b) => b.accountIndex === ataIndex && b.mint === USDC_MINT_STRING
+      );
+      const postEntry = post.find(
+        (b) => b.accountIndex === ataIndex && b.mint === USDC_MINT_STRING
       );
 
-      // Fallback: some parsers omit owner; match on the ATA index.
-      const preAmount = preMatch
-        ? Number(preMatch.uiTokenAmount.uiAmount ?? 0)
-        : (() => {
-            const accounts = tx.transaction.message.accountKeys;
-            const idx = accounts.findIndex((a) =>
-              (typeof a === "string" ? a : a.pubkey.toBase58()) === ataStr
-            );
-            const entry = pre.find((b) => b.accountIndex === idx);
-            return entry ? Number(entry.uiTokenAmount.uiAmount ?? 0) : 0;
-          })();
-      const postAmount = postMatch
-        ? Number(postMatch.uiTokenAmount.uiAmount ?? 0)
-        : (() => {
-            const accounts = tx.transaction.message.accountKeys;
-            const idx = accounts.findIndex((a) =>
-              (typeof a === "string" ? a : a.pubkey.toBase58()) === ataStr
-            );
-            const entry = post.find((b) => b.accountIndex === idx);
-            return entry ? Number(entry.uiTokenAmount.uiAmount ?? 0) : 0;
-          })();
+      const preAmount = preEntry ? Number(preEntry.uiTokenAmount.uiAmount ?? 0) : 0;
+      const postAmount = postEntry ? Number(postEntry.uiTokenAmount.uiAmount ?? 0) : 0;
 
       const delta = postAmount - preAmount;
       if (delta <= 0) continue;

@@ -17,17 +17,12 @@ export async function GET() {
     // Check cache first — return immediately if fresh
     const cacheNow = Date.now();
     if (cachedState && cacheNow - cachedState.timestamp < CACHE_TTL) {
-      // Still advance the engine in the background so the next cache miss
-      // gets fresh data, but don't block this response.
-      tick().catch(() => {});
       return NextResponse.json(cachedState.data);
     }
 
-    // On cache miss, peek at the current race and decide: if the race looks
-    // fresh (its server-side phase roughly matches wall clock), we can advance
-    // the engine in background. If the race is *stale* (wall clock far past a
-    // phase boundary), we block on a tick so the first-load user sees correct
-    // state instead of the stale DB row.
+    // On cache miss, peek at the current race. If the race is *stale* (wall
+    // clock far past a phase boundary), block on a bounded tick catch-up so the
+    // first-load user sees correct state instead of a stale DB row.
     let current = await getCurrentRace();
     const staleThresholdMs = 2000;
     if (current) {
@@ -61,8 +56,6 @@ export async function GET() {
             (current.status === "settled" && cacheNow >= rx + staleThresholdMs);
           if (!stillStale) break;
         }
-      } else {
-        tick().catch(() => {});
       }
     } else {
       // No current race at all — block on a tick to kick one off.
